@@ -30,6 +30,8 @@ const state = {
   routes: { DRIVE: new Map(), WALK: new Map() },
   showCount: 10,
   searchId: 0,
+  cuisine: null, // 吃的類別：選定的料理類型
+  kind: null, // 吃的類別：「餐廳」或「小吃店」
 };
 
 // ---------- 工具 ----------
@@ -130,6 +132,8 @@ async function runSearch() {
   const origin = state.origin;
   state.places = [];
   state.showCount = 10;
+  state.cuisine = null;
+  state.kind = null;
   state.routes = { DRIVE: new Map(), WALK: new Map() };
   setStatus(`搜尋「${cat.name}」中…`);
   renderList();
@@ -140,7 +144,8 @@ async function runSearch() {
     state.places = raw
       .map((p) => {
         const loc = { lat: p.location.latitude, lng: p.location.longitude };
-        return { ...p, loc, straight: haversine(origin, loc) };
+        const food = cat.food ? { cuisine: cuisineLabel(p), kind: shopKind(p) } : {};
+        return { ...p, ...food, loc, straight: haversine(origin, loc) };
       })
       .filter((p) => p.straight <= state.radius)
       .sort((a, b) => a.straight - b.straight)
@@ -176,12 +181,19 @@ function setStatus(text) {
   $('#status').textContent = text;
 }
 
-function visiblePlaces() {
-  const cache = state.routes[state.mode];
-  const list = state.places.filter((p) =>
+// 評分、評論數、營業中篩選（不含料理類型）
+function baseFiltered() {
+  return state.places.filter((p) =>
     (p.rating || 0) >= state.minRating &&
     (p.userRatingCount || 0) >= state.minReviews &&
     (!state.openOnly || p.currentOpeningHours?.openNow === true));
+}
+
+function visiblePlaces() {
+  const cache = state.routes[state.mode];
+  const list = baseFiltered().filter((p) =>
+    (!state.cuisine || p.cuisine === state.cuisine) &&
+    (!state.kind || p.kind === state.kind));
 
   const time = (p) => cache.get(p.id)?.seconds ?? Infinity;
   const sorters = {
@@ -200,9 +212,8 @@ function card(p) {
   const open = p.currentOpeningHours?.openNow;
   const tags = [];
   if (cat.food) {
-    tags.push(`<span class="tag tag-cuisine">${esc(cuisineLabel(p))}</span>`);
-    const kind = shopKind(p);
-    tags.push(`<span class="tag ${kind === '小吃店' ? 'tag-snack' : 'tag-rest'}">${kind}</span>`);
+    tags.push(`<span class="tag tag-cuisine">${esc(p.cuisine)}</span>`);
+    tags.push(`<span class="tag ${p.kind === '小吃店' ? 'tag-snack' : 'tag-rest'}">${p.kind}</span>`);
   } else if (p.primaryTypeDisplayName?.text) {
     tags.push(`<span class="tag tag-cuisine">${esc(p.primaryTypeDisplayName.text)}</span>`);
   }
@@ -230,9 +241,45 @@ function card(p) {
   </li>`;
 }
 
+// 吃的類別：依目前結果產生「餐廳／小吃店」與料理類型的篩選按鈕
+function renderChips() {
+  const bar = $('#chips');
+  if (!state.category?.food || !state.places.length) {
+    bar.hidden = true;
+    return;
+  }
+  const base = baseFiltered();
+  // 店型的數字依目前選的料理類型算，料理類型的數字依目前選的店型算
+  const inCuisine = base.filter((p) => !state.cuisine || p.cuisine === state.cuisine);
+  const inKind = base.filter((p) => !state.kind || p.kind === state.kind);
+  const tally = (list, key) => {
+    const m = new Map();
+    for (const p of list) m.set(p[key], (m.get(p[key]) || 0) + 1);
+    return m;
+  };
+  const kinds = tally(inCuisine, 'kind');
+  const cuisines = [...tally(inKind, 'cuisine')].sort((a, b) => b[1] - a[1]);
+  // 選定的類型數量變 0 時仍保留按鈕，才能點掉
+  if (state.cuisine && !cuisines.some(([c]) => c === state.cuisine)) cuisines.unshift([state.cuisine, 0]);
+
+  const chip = (group, val, label, n) => {
+    const active = val === null ? !state.cuisine && !state.kind : state[group] === val;
+    if (!n && !active && val !== null) return '';
+    return `<button class="chip${active ? ' active' : ''}" data-group="${group}" data-val="${esc(val ?? '')}">${esc(label)} <b>${n}</b></button>`;
+  };
+  bar.innerHTML = [
+    chip('all', null, '全部', base.length),
+    ...['小吃店', '餐廳'].map((k) => chip('kind', k, k, kinds.get(k) || 0)),
+    '<span class="chip-sep"></span>',
+    ...cuisines.map(([c, n]) => chip('cuisine', c, c, n)),
+  ].join('');
+  bar.hidden = false;
+}
+
 function renderList() {
   const list = $('#results');
   const more = $('#more');
+  renderChips();
   if (!state.category) {
     list.innerHTML = '';
     more.hidden = true;
@@ -243,7 +290,9 @@ function renderList() {
   const shown = all.slice(0, state.showCount);
   list.innerHTML = shown.map(card).join('');
   more.hidden = all.length <= state.showCount;
-  if (state.places.length && !all.length) setStatus('沒有符合條件的地點，試著放寬評分或距離');
+  if (state.places.length && !all.length) {
+    setStatus(state.cuisine || state.kind ? '這個類型沒有符合的，點「全部」看其他' : '沒有符合條件的地點，試著放寬評分或距離');
+  }
   else if (state.places.length) {
     setStatus(`${state.category.name}：符合 ${all.length} 間，顯示 ${shown.length} 間（${fmtDist(state.radius)}內）`);
   }
@@ -307,6 +356,20 @@ function bind() {
     renderList();
   };
   ['#min-rating', '#min-reviews', '#sort', '#open-only'].forEach((s) => $(s).addEventListener('change', onFilter));
+
+  $('#chips').addEventListener('click', (e) => {
+    const btn = e.target.closest('.chip');
+    if (!btn) return;
+    const { group, val } = btn.dataset;
+    if (group === 'all') {
+      state.cuisine = null;
+      state.kind = null;
+    } else {
+      state[group] = state[group] === val ? null : val; // 再點一次取消
+    }
+    state.showCount = 10;
+    renderList();
+  });
 
   $('#more').addEventListener('click', () => {
     state.showCount += 10;
