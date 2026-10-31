@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <title>旅遊玩意</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="旅遊玩意">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="title-row">
+      <h1>旅遊玩意</h1>
+      <span class="mock-badge">測試模式</span>
+      <button id="open-settings" class="icon-btn" aria-label="設定">⚙️</button>
+    </div>
+
+    <div class="origin">
+      <span id="origin-label">尚未設定位置</span>
+      <button id="locate" class="small-btn">重新定位</button>
+    </div>
+    <form id="address-form" class="address-form">
+      <input id="address" type="search" placeholder="或輸入地址、地標…" enterkeyhint="search" autocomplete="off">
+      <button type="submit" class="small-btn">搜尋</button>
+    </form>
+
+    <div class="mode" role="group" aria-label="交通方式">
+      <button class="mode-btn" data-mode="DRIVE">🚗 開車</button>
+      <button class="mode-btn" data-mode="WALK">🚶 走路</button>
+    </div>
+  </header>
+
+  <main>
+    <nav id="categories" class="categories"></nav>
+
+    <section class="filters">
+      <label>範圍
+        <select id="radius">
+          <option value="500">500 公尺</option>
+          <option value="1000">1 公里</option>
+          <option value="3000">3 公里</option>
+          <option value="5000">5 公里</option>
+          <option value="10000">10 公里</option>
+          <option value="20000">20 公里</option>
+        </select>
+      </label>
+      <label>評分
+        <select id="min-rating">
+          <option value="0">不限</option>
+          <option value="3.5">3.5 以上</option>
+          <option value="4">4.0 以上</option>
+          <option value="4.3">4.3 以上</option>
+          <option value="4.5">4.5 以上</option>
+        </select>
+      </label>
+      <label>評論數
+        <select id="min-reviews">
+          <option value="0">不限</option>
+          <option value="20">20 則以上</option>
+          <option value="100">100 則以上</option>
+          <option value="500">500 則以上</option>
+          <option value="1000">1000 則以上</option>
+        </select>
+      </label>
+      <label>排序
+        <select id="sort">
+          <option value="distance">由近到遠</option>
+          <option value="fastest">最快抵達</option>
+          <option value="rating">評分高到低</option>
+          <option value="reviews">評論數多到少</option>
+        </select>
+      </label>
+      <label class="check"><input id="open-only" type="checkbox"> 只看營業中</label>
+    </section>
+
+    <p id="status" class="status" aria-live="polite"></p>
+    <ul id="results" class="results"></ul>
+    <button id="more" class="more-btn" hidden>再顯示 10 間</button>
+  </main>
+
+  <dialog id="settings">
+    <form id="settings-form" method="dialog">
+      <h2>設定</h2>
+      <label for="api-key">Google API 金鑰</label>
+      <input id="api-key" type="text" autocomplete="off" spellcheck="false" placeholder="AIza…">
+      <p class="hint">金鑰只存在這台手機。需開通 Places API (New) 與 Routes API。</p>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="small-btn ghost">取消</button>
+        <button value="save" class="small-btn">儲存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
