@@ -92,27 +92,47 @@ function whenDate() {
   return d;
 }
 
+const isArrive = () => state.when?.type === 'arrive';
 const whenWord = () => (state.when ? `${DAY_WORDS[state.when.day]} ${state.when.time}` : '現在');
 
-// 用「現在」的附近搜尋直接用 Google 的 openNow（含國定假日等特殊時段），其他情況用每週營業時間推算
-// 順路模式看的是「抵達那間店的時間」
+// 從起點到這間店要幾秒（附近模式用路程矩陣，順路模式用起點→店那段），還沒算出來回傳 undefined
+function travelSeconds(p) {
+  return state.view === 'route' ? p.toPlace?.seconds : state.routes[state.mode].get(p.id)?.seconds;
+}
+
+// 抵達這間店的時間：指定抵達就是那個時間；出發（含現在）則是出發時間＋路程
+function arrivalTime(p) {
+  if (isArrive()) return whenDate();
+  return new Date(whenDate().getTime() + (travelSeconds(p) || 0) * 1000);
+}
+
+// 依抵達時間用每週營業時間推算；沒有營業時間資料時，「現在出發」才退回 Google 的 openNow
 function openStatus(p) {
-  if (!state.when && state.view === 'nearby') {
-    return p.currentOpeningHours?.openNow ?? isOpenAt(p, new Date());
+  const byHours = isOpenAt(p, arrivalTime(p));
+  if (!state.when) {
+    const googleNow = p.currentOpeningHours?.openNow;
+    // 每週時間說現在有開、Google 卻說沒開 → 今天臨時公休或特殊時段
+    if (googleNow === false && isOpenAt(p, new Date()) === true) return false;
+    return byHours ?? googleNow;
   }
-  let t = whenDate();
-  if (state.view === 'route' && p.toPlace) t = new Date(t.getTime() + p.toPlace.seconds * 1000);
-  return isOpenAt(p, t) ?? (state.when ? undefined : p.currentOpeningHours?.openNow);
+  return byHours;
 }
 
 function openTag(p) {
   const open = openStatus(p);
   if (open === undefined) return autoOpen() ? '<span class="tag tag-unknown">時間不明</span>' : '';
-  let text;
-  if (state.view === 'route') text = open ? '抵達時營業中' : '抵達時沒營業';
-  else if (state.when) text = `${whenWord()} ${open ? '有營業' : '沒營業'}`;
-  else text = open ? '營業中' : '休息中';
+  const text = isArrive()
+    ? `${whenWord()} ${open ? '有營業' : '沒營業'}`
+    : (open ? '抵達時營業中' : '抵達時沒營業');
   return `<span class="tag ${open ? 'tag-open' : 'tag-closed'}">${text}</span>`;
+}
+
+// 出發 → 顯示大約幾點到；抵達 → 顯示要幾點出發
+function clockNote(p) {
+  const sec = travelSeconds(p);
+  if (sec === undefined) return '';
+  if (isArrive()) return `（${fmtClock(new Date(whenDate().getTime() - sec * 1000))} 出發）`;
+  return `（約 ${fmtClock(arrivalTime(p))} 到）`;
 }
 
 // 只有「現在＋附近」才請 Google 直接過濾營業中，其他時間要拿到全部再自己判斷
@@ -123,14 +143,16 @@ function applyMealTime(cat) {
   if (state.when || !cat.mealTime) return;
   const now = fmtClock(new Date());
   if (now >= cat.mealTime.start) return;
-  state.when = { day: 0, time: cat.mealTime.pick };
+  state.when = { type: 'arrive', day: 0, time: cat.mealTime.pick };
   syncWhen();
-  toast(`還沒到${cat.name}時間，改看今天 ${cat.mealTime.pick} 有營業的`);
+  toast(`還沒到${cat.name}時間，改看今天 ${cat.mealTime.pick} 抵達有營業的`);
 }
 
 function syncWhen() {
-  $('#when-day').value = state.when ? String(state.when.day) : '';
+  $('#when-type').value = state.when?.type || '';
+  $('#when-day').value = String(state.when?.day ?? 0);
   $('#when-time').value = state.when?.time || '';
+  $('#when-day').hidden = !state.when;
   $('#when-time').hidden = !state.when;
 }
 
@@ -367,10 +389,10 @@ function visiblePlaces() {
 function travelLine(p) {
   if (state.view === 'route') {
     if (p.detour === null) return `距起點直線 ${fmtDist(p.straight)}`;
-    return `繞路 +${fmtTime(p.detour)}・${modeIcon()} 出發後 ${fmtTime(p.toPlace.seconds)} 到`;
+    return `繞路 +${fmtTime(p.detour)}・${modeIcon()} ${fmtTime(p.toPlace.seconds)}${clockNote(p)}`;
   }
   const route = state.routes[state.mode].get(p.id);
-  if (route) return `${fmtDist(route.meters)} · ${modeIcon()} ${fmtTime(route.seconds)}`;
+  if (route) return `${fmtDist(route.meters)} · ${modeIcon()} ${fmtTime(route.seconds)}${clockNote(p)}`;
   return `直線 ${fmtDist(p.straight)}${state.routes[state.mode].has(p.id) ? ` · ${modeIcon()} 無路線` : ''}`;
 }
 
@@ -468,8 +490,7 @@ function renderList() {
     const scope = state.view === 'route' ? `繞路 ${state.maxDetour / 60} 分內` : `${fmtDist(state.radius)}內`;
     let openNote = '';
     if (autoOpen()) {
-      const at = state.view === 'route' ? '抵達時' : state.when ? `${whenWord()} ` : '';
-      openNote = `，已排除${at}沒營業的`;
+      openNote = `，已排除${isArrive() ? `${whenWord()} ` : '抵達時'}沒營業的`;
     }
     setStatus(`${queryName(state.query)}：符合 ${all.length} 間，顯示 ${shown.length} 間（${scope}${openNote}）`);
   }
@@ -581,17 +602,18 @@ function bind() {
   ['#detour', '#min-rating', '#min-reviews', '#sort', '#open-only'].forEach((s) => $(s).addEventListener('change', onFilter));
 
   const onWhen = () => {
-    const day = $('#when-day').value;
-    if (day === '') state.when = null;
+    const type = $('#when-type').value;
+    if (!type) state.when = null;
     else {
       const fallback = state.when?.time || fmtClock(new Date(Date.now() + 3600e3)).replace(/:\d\d$/, ':00');
-      state.when = { day: Number(day), time: $('#when-time').value || fallback };
+      state.when = { type, day: Number($('#when-day').value), time: $('#when-time').value || fallback };
     }
     syncWhen();
     // 「現在＋附近」的結果被 Google 預先過濾過，換時間要重搜才拿得到其他店
     if (state.query?.cat?.openNow && state.view === 'nearby') runSearch();
     else renderList();
   };
+  $('#when-type').addEventListener('change', onWhen);
   $('#when-day').addEventListener('change', onWhen);
   $('#when-time').addEventListener('change', onWhen);
 

@@ -183,10 +183,8 @@ main { padding: 12px 16px 24px; max-width: 720px; margin: 0 auto; }
   gap: 8px;
   margin-top: 12px;
 }
-.when { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
-.when-label { font-size: 14px; white-space: nowrap; }
+.when { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; }
 .when select, .when input {
-  flex: 1;
   min-width: 0;
   padding: 7px 8px;
   border: 1px solid var(--line);
@@ -194,7 +192,8 @@ main { padding: 12px 16px 24px; max-width: 720px; margin: 0 auto; }
   background: var(--surface);
   font-size: 15px;
 }
-.when input[hidden] { display: none; }
+#when-type { flex: 1; }
+.when [hidden] { display: none; }
 .filters label { display: grid; gap: 2px; font-size: 12px; color: var(--muted); }
 .filters select {
   padding: 7px 8px;

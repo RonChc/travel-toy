@@ -65,9 +65,12 @@
 
     <section class="filters">
       <div class="when">
-        <span class="when-label">🕒 什麼時候去</span>
-        <select id="when-day" aria-label="哪一天">
-          <option value="">現在</option>
+        <select id="when-type" aria-label="出發或抵達時間">
+          <option value="">🕒 現在出發</option>
+          <option value="depart">🕒 幾點出發</option>
+          <option value="arrive">🕒 幾點抵達</option>
+        </select>
+        <select id="when-day" aria-label="哪一天" hidden>
           <option value="0">今天</option>
           <option value="1">明天</option>
           <option value="2">後天</option>
