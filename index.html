@@ -140,11 +140,15 @@
   <dialog id="settings">
     <form id="settings-form" method="dialog">
       <h2>設定</h2>
+      <label for="setup-code">設定碼（家人傳來的，貼上後按儲存）</label>
+      <input id="setup-code" type="text" autocomplete="off" spellcheck="false" placeholder="TT1:…">
       <label for="api-key">Google API 金鑰</label>
       <input id="api-key" type="text" autocomplete="off" spellcheck="false" placeholder="AIza…">
       <label for="claude-key">Claude API 金鑰（AI 功能用，可不填）</label>
       <input id="claude-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
       <p class="hint">金鑰只存在這台手機。Claude 金鑰無法限制網址，建議到 Claude Console 設定每月花費上限。</p>
+      <button type="button" id="share-setup" class="link-btn">分享設定給家人</button>
+      <p class="hint">設定碼含金鑰，只傳給家人，不要貼到公開的地方。</p>
       <div class="dialog-actions">
         <button value="cancel" formnovalidate class="ghost-btn">取消</button>
         <button value="save" class="primary-btn">儲存</button>

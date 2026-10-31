@@ -542,6 +542,49 @@ function openSettings() {
   $('#settings').showModal();
 }
 
+// ---------- 設定碼：把金鑰與同行成員打包，方便傳給家人 ----------
+const SETUP_PREFIX = 'TT1:';
+
+function encodeSetup() {
+  const json = JSON.stringify({ key: state.key, claudeKey: state.claudeKey, party: state.party });
+  const bin = String.fromCharCode(...new TextEncoder().encode(json));
+  return SETUP_PREFIX + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// 成功回傳 true；格式不對回傳 false
+function applySetup(code) {
+  const raw = code.trim();
+  if (!raw.startsWith(SETUP_PREFIX)) return false;
+  try {
+    const b64 = raw.slice(SETUP_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    if (typeof data.key === 'string') state.key = data.key;
+    if (typeof data.claudeKey === 'string') state.claudeKey = data.claudeKey;
+    if (data.party) state.party = { ...state.party, ...data.party };
+    savePrefs();
+    syncPartyButton();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function shareSetup() {
+  if (!state.key) return toast('先儲存 Google 金鑰，才能分享設定');
+  const code = encodeSetup();
+  const text = `旅遊玩意設定碼（打開 App 點 ⚙️，貼到「設定碼」再按儲存）：\n${code}`;
+  try {
+    if (navigator.share) await navigator.share({ text });
+    else {
+      await navigator.clipboard.writeText(code);
+      toast('設定碼已複製，貼到 LINE 傳給家人');
+    }
+  } catch (err) {
+    if (err?.name !== 'AbortError') toast('分享失敗，請再試一次');
+  }
+}
+
 function requireClaudeKey() {
   if (MOCK || state.claudeKey) return true;
   openSettings();
@@ -849,11 +892,18 @@ function bind() {
   $('#open-settings').addEventListener('click', openSettings);
   $('#settings-form').addEventListener('submit', (e) => {
     if (e.submitter?.value !== 'save') return;
+    const code = $('#setup-code').value.trim();
+    $('#setup-code').value = '';
+    if (code) {
+      toast(applySetup(code) ? '設定碼已套用，可以開始用了' : '設定碼不正確，請整段重新複製');
+      return;
+    }
     state.key = $('#api-key').value.trim();
     state.claudeKey = $('#claude-key').value.trim();
     savePrefs();
     toast('設定已儲存');
   });
+  $('#share-setup').addEventListener('click', shareSetup);
 
   $('#ai-pick').addEventListener('click', aiPick);
   $('#plan-ui').addEventListener('submit', planTrip);
