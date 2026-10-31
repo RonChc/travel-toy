@@ -6,7 +6,7 @@ const ROUTE_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
 const PLACE_FIELDS = [
   'id', 'displayName', 'location', 'rating', 'userRatingCount', 'primaryType',
-  'primaryTypeDisplayName', 'types', 'priceLevel', 'currentOpeningHours.openNow',
+  'primaryTypeDisplayName', 'types', 'priceLevel', 'currentOpeningHours.openNow', 'regularOpeningHours.periods',
   'googleMapsUri', 'shortFormattedAddress',
 ].map((f) => `places.${f}`).join(',');
 

@@ -1,15 +1,19 @@
 ﻿// 每個類別：types 走 Nearby Search（依 Google 分類），queries 走 Text Search（依關鍵字），兩者結果合併去重
 // alongQueries：順路搜尋只能用關鍵字，沒有 queries 的類別改用這組（都沒有就用類別名稱）
-// openNow: true 自動排除搜尋當下沒營業的店
+// openNow: true 自動排除沒營業的店（依「什麼時候去」的時間判斷）
+// mealTime：時間設「現在」且還沒到 start 時，自動改看今天 pick 這個時間
 // food: true 會顯示料理類型與「餐廳／小吃店」標籤
 export const CATEGORIES = [
-  { id: 'breakfast', name: '早餐', icon: '🍳', food: true, openNow: true, queries: ['早餐店', '早午餐'] },
   {
-    id: 'lunch', name: '午餐', icon: '🍱', food: true, openNow: true,
+    id: 'breakfast', name: '早餐', icon: '🍳', food: true, openNow: true, mealTime: { start: '06:00', pick: '08:00' },
+    queries: ['早餐店', '早午餐'],
+  },
+  {
+    id: 'lunch', name: '午餐', icon: '🍱', food: true, openNow: true, mealTime: { start: '11:00', pick: '12:00' },
     types: ['restaurant', 'meal_takeaway'], alongQueries: ['餐廳', '小吃'],
   },
   {
-    id: 'dinner', name: '晚餐', icon: '🍲', food: true, openNow: true,
+    id: 'dinner', name: '晚餐', icon: '🍲', food: true, openNow: true, mealTime: { start: '17:00', pick: '18:30' },
     types: ['restaurant', 'meal_takeaway'], alongQueries: ['餐廳', '小吃'],
   },
   {

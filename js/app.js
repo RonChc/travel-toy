@@ -1,5 +1,6 @@
 import { CATEGORIES } from './categories.js';
 import { cuisineLabel, shopKind } from './classify.js';
+import { isOpenAt, fmtClock } from './hours.js';
 import * as realApi from './api.js';
 import * as mockApi from './mock.js';
 
@@ -40,6 +41,7 @@ const state = {
   searchId: 0,
   cuisine: null, // 吃的類別：選定的料理類型
   kind: null, // 吃的類別：「餐廳」或「小吃店」
+  when: null, // 什麼時候去：null = 現在，或 { day: 0|1|2（今天起算）, time: 'HH:MM' }
 };
 
 const sortKey = () => (state.view === 'route' ? 'sortRoute' : 'sortNearby');
@@ -76,6 +78,60 @@ function requireKey() {
   openSettings();
   toast('請先輸入 Google API 金鑰');
   return false;
+}
+
+// ---------- 營業時間 ----------
+const DAY_WORDS = ['今天', '明天', '後天'];
+
+function whenDate() {
+  if (!state.when) return new Date();
+  const [h, m] = state.when.time.split(':').map(Number);
+  const d = new Date();
+  d.setDate(d.getDate() + state.when.day);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+const whenWord = () => (state.when ? `${DAY_WORDS[state.when.day]} ${state.when.time}` : '現在');
+
+// 用「現在」的附近搜尋直接用 Google 的 openNow（含國定假日等特殊時段），其他情況用每週營業時間推算
+// 順路模式看的是「抵達那間店的時間」
+function openStatus(p) {
+  if (!state.when && state.view === 'nearby') {
+    return p.currentOpeningHours?.openNow ?? isOpenAt(p, new Date());
+  }
+  let t = whenDate();
+  if (state.view === 'route' && p.toPlace) t = new Date(t.getTime() + p.toPlace.seconds * 1000);
+  return isOpenAt(p, t) ?? (state.when ? undefined : p.currentOpeningHours?.openNow);
+}
+
+function openTag(p) {
+  const open = openStatus(p);
+  if (open === undefined) return autoOpen() ? '<span class="tag tag-unknown">時間不明</span>' : '';
+  let text;
+  if (state.view === 'route') text = open ? '抵達時營業中' : '抵達時沒營業';
+  else if (state.when) text = `${whenWord()} ${open ? '有營業' : '沒營業'}`;
+  else text = open ? '營業中' : '休息中';
+  return `<span class="tag ${open ? 'tag-open' : 'tag-closed'}">${text}</span>`;
+}
+
+// 只有「現在＋附近」才請 Google 直接過濾營業中，其他時間要拿到全部再自己判斷
+const serverOpenNow = (q) => !!q.cat?.openNow && !state.when && state.view === 'nearby';
+
+// 餐點類別：時間是「現在」但還沒到用餐時段，自動改看今天的用餐時間
+function applyMealTime(cat) {
+  if (state.when || !cat.mealTime) return;
+  const now = fmtClock(new Date());
+  if (now >= cat.mealTime.start) return;
+  state.when = { day: 0, time: cat.mealTime.pick };
+  syncWhen();
+  toast(`還沒到${cat.name}時間，改看今天 ${cat.mealTime.pick} 有營業的`);
+}
+
+function syncWhen() {
+  $('#when-day').value = state.when ? String(state.when.day) : '';
+  $('#when-time').value = state.when?.time || '';
+  $('#when-time').hidden = !state.when;
 }
 
 const queryName = (q) => (q.cat ? q.cat.name : `「${q.text}」`);
@@ -172,18 +228,18 @@ function fetchNearby(q, origin, radius) {
       return api.searchNearby(state.key, origin, radius, cat.fallbackTypes);
     }));
   }
-  for (const t of cat.queries || []) jobs.push(api.searchText(state.key, t, origin, radius, !!cat.openNow));
+  for (const t of cat.queries || []) jobs.push(api.searchText(state.key, t, origin, radius, serverOpenNow(q)));
   return settle(jobs);
 }
 
 function fetchAlong(q, route) {
   const texts = q.text ? [q.text] : (q.cat.queries || q.cat.alongQueries || [q.cat.name]);
-  const openNow = !!q.cat?.openNow;
-  return settle(texts.map((t) => api.searchAlongRoute(state.key, t, route.polyline, route.a, state.mode, openNow)));
+  return settle(texts.map((t) => api.searchAlongRoute(state.key, t, route.polyline, route.a, state.mode)));
 }
 
 function startSearch(query) {
   state.query = query;
+  if (query.cat) applyMealTime(query.cat);
   renderCategories();
   runSearch();
   $('#status').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -284,8 +340,8 @@ function baseFiltered() {
   return state.places.filter((p) =>
     (p.rating || 0) >= state.minRating &&
     (p.userRatingCount || 0) >= state.minReviews &&
-    (!state.openOnly || p.currentOpeningHours?.openNow === true) &&
-    (!mustOpen || p.currentOpeningHours?.openNow !== false) &&
+    (!state.openOnly || openStatus(p) === true) &&
+    (!mustOpen || openStatus(p) !== false) &&
     (state.view !== 'route' || p.detour === null || p.detour <= state.maxDetour));
 }
 
@@ -330,7 +386,6 @@ function navUrl(p) {
 }
 
 function card(p) {
-  const open = p.currentOpeningHours?.openNow;
   const tags = [];
   if (p.cuisine) {
     tags.push(`<span class="tag tag-cuisine">${esc(p.cuisine)}</span>`);
@@ -338,9 +393,7 @@ function card(p) {
   } else if (p.primaryTypeDisplayName?.text) {
     tags.push(`<span class="tag tag-cuisine">${esc(p.primaryTypeDisplayName.text)}</span>`);
   }
-  if (open === true) tags.push('<span class="tag tag-open">營業中</span>');
-  if (open === false) tags.push('<span class="tag tag-closed">休息中</span>');
-  if (open === undefined && autoOpen()) tags.push('<span class="tag tag-unknown">時間不明</span>');
+  tags.push(openTag(p));
 
   const rating = p.rating
     ? `<span class="rating">★ ${p.rating.toFixed(1)}</span><span class="count">(${(p.userRatingCount || 0).toLocaleString()})</span>`
@@ -413,7 +466,11 @@ function renderList() {
       : `沒有符合條件的地點，試著放寬評分或${state.view === 'route' ? '繞路時間' : '距離'}`);
   } else if (state.places.length) {
     const scope = state.view === 'route' ? `繞路 ${state.maxDetour / 60} 分內` : `${fmtDist(state.radius)}內`;
-    const openNote = autoOpen() ? '，已排除沒營業的' : '';
+    let openNote = '';
+    if (autoOpen()) {
+      const at = state.view === 'route' ? '抵達時' : state.when ? `${whenWord()} ` : '';
+      openNote = `，已排除${at}沒營業的`;
+    }
     setStatus(`${queryName(state.query)}：符合 ${all.length} 間，顯示 ${shown.length} 間（${scope}${openNote}）`);
   }
 }
@@ -523,6 +580,21 @@ function bind() {
   };
   ['#detour', '#min-rating', '#min-reviews', '#sort', '#open-only'].forEach((s) => $(s).addEventListener('change', onFilter));
 
+  const onWhen = () => {
+    const day = $('#when-day').value;
+    if (day === '') state.when = null;
+    else {
+      const fallback = state.when?.time || fmtClock(new Date(Date.now() + 3600e3)).replace(/:\d\d$/, ':00');
+      state.when = { day: Number(day), time: $('#when-time').value || fallback };
+    }
+    syncWhen();
+    // 「現在＋附近」的結果被 Google 預先過濾過，換時間要重搜才拿得到其他店
+    if (state.query?.cat?.openNow && state.view === 'nearby') runSearch();
+    else renderList();
+  };
+  $('#when-day').addEventListener('change', onWhen);
+  $('#when-time').addEventListener('change', onWhen);
+
   $('#chips').addEventListener('click', (e) => {
     const btn = e.target.closest('.chip');
     if (!btn) return;
@@ -555,6 +627,7 @@ function init() {
   if (MOCK) document.body.classList.add('mock');
   renderCategories();
   syncControls();
+  syncWhen();
   bind();
   renderList();
   locateMe();

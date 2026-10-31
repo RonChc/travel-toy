@@ -64,6 +64,16 @@
     <nav id="categories" class="categories"></nav>
 
     <section class="filters">
+      <div class="when">
+        <span class="when-label">🕒 什麼時候去</span>
+        <select id="when-day" aria-label="哪一天">
+          <option value="">現在</option>
+          <option value="0">今天</option>
+          <option value="1">明天</option>
+          <option value="2">後天</option>
+        </select>
+        <input id="when-time" type="time" step="900" aria-label="幾點" hidden>
+      </div>
       <label id="detour-wrap" hidden>繞路上限
         <select id="detour">
           <option value="300">5 分鐘內</option>

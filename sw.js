@@ -1,8 +1,8 @@
 // 只快取 App 外殼；Google API 一律走網路
-const CACHE = 'travel-toy-v1';
+const CACHE = 'travel-toy-v2';
 const SHELL = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest', 'icons/icon.svg',
-  'js/app.js', 'js/api.js', 'js/categories.js', 'js/classify.js', 'js/mock.js',
+  'js/app.js', 'js/api.js', 'js/categories.js', 'js/classify.js', 'js/hours.js', 'js/mock.js',
 ];
 
 self.addEventListener('install', (e) => {

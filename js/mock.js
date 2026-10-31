@@ -1,4 +1,5 @@
 // 測試模式（網址加 ?mock）：不呼叫 Google，產生假資料，方便沒有金鑰時測介面
+import { isOpenAt } from './hours.js';
 
 const SAMPLES = [
   ['阿明牛肉麵', 'restaurant', '餐廳', 'PRICE_LEVEL_INEXPENSIVE'],
@@ -17,6 +18,20 @@ const SAMPLES = [
   ['市府停車場', 'parking', '停車場', null],
   ['公園公廁', 'public_bathroom', '公共廁所', null],
 ];
+
+// 營業時間樣式：午晚餐（11-14、17-21）、早餐（06-13）、全天（11-21）；每 7 間有 1 間沒資料
+const HOURS = [[[11, 14], [17, 21]], [[6, 13]], [[11, 21]]];
+function mockHours(i) {
+  if (i % 7 === 3) return {};
+  const periods = [];
+  for (let day = 0; day < 7; day++) {
+    for (const [o, c] of HOURS[i % 3]) {
+      periods.push({ open: { day, hour: o, minute: 0 }, close: { day, hour: c, minute: 0 } });
+    }
+  }
+  const place = { regularOpeningHours: { periods } };
+  return { ...place, currentOpeningHours: { openNow: isOpenAt(place, new Date()) } };
+}
 
 function rand(seed) {
   const x = Math.sin(seed) * 10000;
@@ -40,7 +55,7 @@ export async function searchNearby(key, center, radius, types) {
     primaryTypeDisplayName: { text: display },
     types: [type, 'food', 'point_of_interest'],
     priceLevel: price || undefined,
-    currentOpeningHours: i % 7 === 3 ? undefined : { openNow: rand(i + 7) > 0.25 },
+    ...mockHours(i),
     googleMapsUri: 'https://maps.google.com/',
     shortFormattedAddress: `測試路 ${i + 1} 號`,
   }));
