@@ -25,7 +25,7 @@
 - 純前端靜態網頁（HTML + 原生 JS ES modules，無 build），PWA（manifest + sw.js）
 - 資料：Google Places API (New)（searchNearby / searchText）、Routes API（computeRouteMatrix），瀏覽器直接 fetch（已確認 CORS 可用）
 - API 金鑰：使用者在 App 設定裡輸入，存手機 localStorage，不放進程式碼
-- 部署：預計 GitHub Pages（定位需要 HTTPS）
+- 部署：GitHub Pages https://ronchc.github.io/travel-toy/ （repo RonChc/travel-toy 公開，master 根目錄；git push 後約 1 分鐘自動更新）
 
 ## 如何執行
 ```
@@ -44,6 +44,7 @@ http://localhost:5173/?mock   # 測試模式：假資料，不需金鑰
 - 重要變更用 git commit 留紀錄。
 
 ## 目前進度
+- 2026-10-31 已部署到 GitHub Pages，線上測試模式正常
 - 2026-10-31 時間設定改為 現在出發／幾點出發／幾點抵達（測試模式跑過）
 - 2026-10-31 加入「什麼時候去」時間設定、用餐時段自動帶時間、順路看抵達時營業（測試模式跑過）
 - 2026-10-31 餐點類別自動排除沒營業的店（測試模式跑過）
@@ -53,7 +54,7 @@ http://localhost:5173/?mock   # 測試模式：假資料，不需金鑰
 
 ## 下一步
 - 使用者申請 Google API 金鑰（開 Places API (New) + Routes API，限制 HTTP referrer）
-- 部署到 GitHub Pages（帳號 RonChc，本專案獨立一個公開 repo；EIS 另開私人 repo，不要放一起），手機實測真實資料
+- 手機實測真實資料（EIS 另開私人 repo，不要和本專案放一起）
 - 依實測調整：類別關鍵字、料理類型判斷準確度
 - 實測確認順路 API 的 routingSummaries 真的回傳兩段 legs（起點→店、店→終點），否則繞路時間要改算法
 - 之後可加：政府公廁開放資料、收藏清單
