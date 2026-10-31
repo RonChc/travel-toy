@@ -172,13 +172,14 @@ function fetchNearby(q, origin, radius) {
       return api.searchNearby(state.key, origin, radius, cat.fallbackTypes);
     }));
   }
-  for (const t of cat.queries || []) jobs.push(api.searchText(state.key, t, origin, radius));
+  for (const t of cat.queries || []) jobs.push(api.searchText(state.key, t, origin, radius, !!cat.openNow));
   return settle(jobs);
 }
 
 function fetchAlong(q, route) {
   const texts = q.text ? [q.text] : (q.cat.queries || q.cat.alongQueries || [q.cat.name]);
-  return settle(texts.map((t) => api.searchAlongRoute(state.key, t, route.polyline, route.a, state.mode)));
+  const openNow = !!q.cat?.openNow;
+  return settle(texts.map((t) => api.searchAlongRoute(state.key, t, route.polyline, route.a, state.mode, openNow)));
 }
 
 function startSearch(query) {
@@ -274,12 +275,17 @@ function setStatus(text) {
   $('#status').textContent = text;
 }
 
+// 餐點類別：自動排除確定沒營業的（營業時間不明的保留）
+const autoOpen = () => !!state.query?.cat?.openNow;
+
 // 評分、評論數、營業中、順路繞路上限（不含料理類型）
 function baseFiltered() {
+  const mustOpen = autoOpen();
   return state.places.filter((p) =>
     (p.rating || 0) >= state.minRating &&
     (p.userRatingCount || 0) >= state.minReviews &&
     (!state.openOnly || p.currentOpeningHours?.openNow === true) &&
+    (!mustOpen || p.currentOpeningHours?.openNow !== false) &&
     (state.view !== 'route' || p.detour === null || p.detour <= state.maxDetour));
 }
 
@@ -334,6 +340,7 @@ function card(p) {
   }
   if (open === true) tags.push('<span class="tag tag-open">營業中</span>');
   if (open === false) tags.push('<span class="tag tag-closed">休息中</span>');
+  if (open === undefined && autoOpen()) tags.push('<span class="tag tag-unknown">時間不明</span>');
 
   const rating = p.rating
     ? `<span class="rating">★ ${p.rating.toFixed(1)}</span><span class="count">(${(p.userRatingCount || 0).toLocaleString()})</span>`
@@ -406,7 +413,8 @@ function renderList() {
       : `沒有符合條件的地點，試著放寬評分或${state.view === 'route' ? '繞路時間' : '距離'}`);
   } else if (state.places.length) {
     const scope = state.view === 'route' ? `繞路 ${state.maxDetour / 60} 分內` : `${fmtDist(state.radius)}內`;
-    setStatus(`${queryName(state.query)}：符合 ${all.length} 間，顯示 ${shown.length} 間（${scope}）`);
+    const openNote = autoOpen() ? '，已排除沒營業的' : '';
+    setStatus(`${queryName(state.query)}：符合 ${all.length} 間，顯示 ${shown.length} 間（${scope}${openNote}）`);
   }
 }
 

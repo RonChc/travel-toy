@@ -40,7 +40,7 @@ export async function searchNearby(key, center, radius, types) {
     primaryTypeDisplayName: { text: display },
     types: [type, 'food', 'point_of_interest'],
     priceLevel: price || undefined,
-    currentOpeningHours: { openNow: rand(i + 7) > 0.25 },
+    currentOpeningHours: i % 7 === 3 ? undefined : { openNow: rand(i + 7) > 0.25 },
     googleMapsUri: 'https://maps.google.com/',
     shortFormattedAddress: `測試路 ${i + 1} 號`,
   }));

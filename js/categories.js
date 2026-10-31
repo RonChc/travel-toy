@@ -1,18 +1,19 @@
-// 每個類別：types 走 Nearby Search（依 Google 分類），queries 走 Text Search（依關鍵字），兩者結果合併去重
+﻿// 每個類別：types 走 Nearby Search（依 Google 分類），queries 走 Text Search（依關鍵字），兩者結果合併去重
 // alongQueries：順路搜尋只能用關鍵字，沒有 queries 的類別改用這組（都沒有就用類別名稱）
+// openNow: true 自動排除搜尋當下沒營業的店
 // food: true 會顯示料理類型與「餐廳／小吃店」標籤
 export const CATEGORIES = [
-  { id: 'breakfast', name: '早餐', icon: '🍳', food: true, queries: ['早餐店', '早午餐'] },
+  { id: 'breakfast', name: '早餐', icon: '🍳', food: true, openNow: true, queries: ['早餐店', '早午餐'] },
   {
-    id: 'lunch', name: '午餐', icon: '🍱', food: true,
+    id: 'lunch', name: '午餐', icon: '🍱', food: true, openNow: true,
     types: ['restaurant', 'meal_takeaway'], alongQueries: ['餐廳', '小吃'],
   },
   {
-    id: 'dinner', name: '晚餐', icon: '🍲', food: true,
+    id: 'dinner', name: '晚餐', icon: '🍲', food: true, openNow: true,
     types: ['restaurant', 'meal_takeaway'], alongQueries: ['餐廳', '小吃'],
   },
   {
-    id: 'cafe', name: '咖啡甜點', icon: '☕',
+    id: 'cafe', name: '咖啡甜點', icon: '☕', openNow: true,
     types: ['cafe', 'coffee_shop', 'dessert_shop', 'bakery', 'tea_house'],
     fallbackTypes: ['cafe', 'bakery'], alongQueries: ['咖啡廳', '甜點'],
   },

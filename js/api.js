@@ -42,9 +42,10 @@ export async function searchNearby(key, center, radius, types) {
   return data.places || [];
 }
 
-export async function searchText(key, query, center, radius) {
+export async function searchText(key, query, center, radius, openNow = false) {
   const data = await post(`${PLACES}:searchText`, {
     textQuery: query,
+    openNow,
     pageSize: 20,
     rankPreference: 'DISTANCE',
     languageCode: 'zh-TW',
@@ -89,11 +90,12 @@ export async function computeRoute(key, a, b, mode) {
 }
 
 // 沿路線搜尋：每筆附上 legs = [起點→店, 店→終點]（秒、公尺）
-export async function searchAlongRoute(key, query, polyline, origin, mode) {
+export async function searchAlongRoute(key, query, polyline, origin, mode, openNow = false) {
   const routingParameters = { origin: latLng(origin), travelMode: mode };
   if (mode === 'DRIVE') routingParameters.routingPreference = 'TRAFFIC_AWARE';
   const data = await post(`${PLACES}:searchText`, {
     textQuery: query,
+    openNow,
     pageSize: 20,
     languageCode: 'zh-TW',
     regionCode: 'TW',
