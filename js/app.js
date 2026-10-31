@@ -1,11 +1,13 @@
 import { CATEGORIES } from './categories.js';
 import { cuisineLabel, shopKind } from './classify.js';
-import { isOpenAt, fmtClock } from './hours.js';
+import { isOpenAt, hoursOn, fmtClock } from './hours.js';
 import * as realApi from './api.js';
 import * as mockApi from './mock.js';
+import * as realAi from './ai.js';
 
 const MOCK = new URLSearchParams(location.search).has('mock');
 const api = MOCK ? mockApi : realApi;
+const ai = MOCK ? mockApi.ai : realAi;
 const MAX_CANDIDATES = 25; // 附近模式送去算路程的最多筆數（依直線距離取最近）
 
 const SORTS = {
@@ -17,7 +19,7 @@ const $ = (sel) => document.querySelector(sel);
 
 // ---------- 偏好設定（只存在這台手機） ----------
 const PREF_KEY = 'travel-toy-prefs';
-const PREF_FIELDS = ['key', 'view', 'mode', 'radius', 'maxDetour', 'minRating', 'minReviews', 'openOnly', 'sortNearby', 'sortRoute'];
+const PREF_FIELDS = ['key', 'claudeKey', 'party', 'view', 'mode', 'radius', 'maxDetour', 'minRating', 'minReviews', 'openOnly', 'sortNearby', 'sortRoute'];
 function loadPrefs() {
   try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; }
 }
@@ -27,9 +29,11 @@ function savePrefs() {
 }
 
 const state = {
-  key: '', view: 'nearby', mode: 'DRIVE', radius: 3000, maxDetour: 600,
+  key: '', claudeKey: '', view: 'nearby', mode: 'DRIVE', radius: 3000, maxDetour: 600,
   minRating: 0, minReviews: 0, openOnly: false, sortNearby: 'distance', sortRoute: 'detour',
+  party: { adults: 2, seniors: 0, kids: [], babies: [], note: '' },
   ...loadPrefs(),
+  aiPicks: new Map(), // AI 推薦：id → 理由
   here: null, // GPS 目前位置
   origin: null, // 附近模式的中心點
   route: null, // 順路模式：{ a, b, seconds, meters, polyline, mode }
@@ -45,6 +49,7 @@ const state = {
 };
 
 const sortKey = () => (state.view === 'route' ? 'sortRoute' : 'sortNearby');
+const isSearchView = () => state.view !== 'plan';
 
 // ---------- 工具 ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -277,6 +282,8 @@ async function runSearch() {
   state.cuisine = null;
   state.kind = null;
   state.routes = { DRIVE: new Map(), WALK: new Map() };
+  state.aiPicks = new Map();
+  $('#ai-box').hidden = true;
   renderList();
 
   try {
@@ -421,12 +428,15 @@ function card(p) {
     ? `<span class="rating">★ ${p.rating.toFixed(1)}</span><span class="count">(${(p.userRatingCount || 0).toLocaleString()})</span>`
     : '<span class="count">尚無評分</span>';
 
-  return `<li class="card">
+  const reason = state.aiPicks.get(p.id);
+
+  return `<li class="card${reason ? ' picked' : ''}">
     <div class="card-main">
       <a class="name" href="${esc(p.googleMapsUri)}" target="_blank" rel="noopener">${esc(p.displayName?.text)}</a>
       <div class="meta">${rating}</div>
       <div class="tags">${tags.join('')}</div>
       <div class="travel">${travelLine(p)}</div>
+      ${reason ? `<div class="ai-reason">AI：${esc(reason)}</div>` : ''}
       <div class="addr">${esc(p.shortFormattedAddress)}</div>
     </div>
     <a class="nav-btn" href="${esc(navUrl(p))}" target="_blank" rel="noopener" aria-label="導航">導航</a>
@@ -475,6 +485,7 @@ function renderList() {
   if (!state.query) {
     list.innerHTML = '';
     more.hidden = true;
+    $('#ai-pick').hidden = true;
     setStatus(state.view === 'route' ? '輸入 A、B 點，再選類別或打關鍵字' : '選一個類別或打關鍵字開始找');
     return;
   }
@@ -482,6 +493,7 @@ function renderList() {
   const shown = all.slice(0, state.showCount);
   list.innerHTML = shown.map(card).join('');
   more.hidden = all.length <= state.showCount;
+  $('#ai-pick').hidden = !all.length;
   if (state.places.length && !all.length) {
     setStatus(state.cuisine || state.kind
       ? '這個類型沒有符合的，點「全部」看其他'
@@ -510,9 +522,11 @@ function syncControls() {
   const route = state.view === 'route';
   $('#nearby-panel').hidden = route;
   $('#route-form').hidden = !route;
-  $('#radius-wrap').hidden = route;
-  $('#detour-wrap').hidden = !route;
-  $('#sort').innerHTML = SORTS[state.view].map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  $('#search-ui').hidden = !isSearchView();
+  $('#plan-ui').hidden = isSearchView();
+  $('#radius').hidden = route;
+  $('#detour').hidden = !route;
+  $('#sort').innerHTML = SORTS[route ? 'route' : 'nearby'].map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
   $('#sort').value = state[sortKey()];
   $('#radius').value = String(state.radius);
   $('#detour').value = String(state.maxDetour);
@@ -524,7 +538,202 @@ function syncControls() {
 // ---------- 設定 ----------
 function openSettings() {
   $('#api-key').value = state.key;
+  $('#claude-key').value = state.claudeKey;
   $('#settings').showModal();
+}
+
+function requireClaudeKey() {
+  if (MOCK || state.claudeKey) return true;
+  openSettings();
+  toast('請先輸入 Claude API 金鑰');
+  return false;
+}
+
+// ---------- 同行成員 ----------
+let partyDraft = null;
+
+function partyShort(party) {
+  const n = party.adults + party.seniors + party.kids.length + party.babies.length;
+  return n ? `${n} 人` : '同行';
+}
+
+function renderPartyForm() {
+  for (const el of document.querySelectorAll('#party .stepper')) {
+    el.querySelector('b').textContent = partyDraft[el.dataset.field];
+  }
+  const ageItem = (group, age, i) => {
+    const ages = group === 'kids' ? [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : [0, 1, 2];
+    const opts = ages.map((a) => `<option value="${a}"${a === age ? ' selected' : ''}>${a === 0 ? '未滿 1 歲' : `${a} 歲`}</option>`).join('');
+    return `<span class="age-item"><select data-group="${group}" data-i="${i}" aria-label="年齡">${opts}</select>`
+      + `<button type="button" data-remove="${group}" data-i="${i}" aria-label="移除">×</button></span>`;
+  };
+  for (const list of document.querySelectorAll('#party .age-list')) {
+    const group = list.dataset.list;
+    list.innerHTML = partyDraft[group].map((age, i) => ageItem(group, age, i)).join('');
+  }
+  $('#party-note').value = partyDraft.note;
+}
+
+function openParty() {
+  partyDraft = structuredClone(state.party);
+  renderPartyForm();
+  $('#party').showModal();
+}
+
+function syncPartyButton() {
+  $('#party-summary').textContent = partyShort(state.party);
+}
+
+// ---------- AI 幫我挑 ----------
+// 送給 AI 的候選地點，只留判斷需要的欄位
+function placeForAi(p) {
+  const route = state.routes[state.mode].get(p.id);
+  return {
+    id: p.id,
+    名稱: p.displayName?.text,
+    評分: p.rating ?? null,
+    評論數: p.userRatingCount ?? 0,
+    類型: p.cuisine ? `${p.cuisine}／${p.kind}` : p.primaryTypeDisplayName?.text,
+    營業: { true: '抵達時有營業', false: '抵達時沒營業', undefined: '不明' }[openStatus(p)],
+    ...(state.view === 'route'
+      ? { 繞路分鐘: p.detour === null ? null : Math.round(p.detour / 60) }
+      : { 距離公尺: Math.round(route?.meters ?? p.straight), [`${modeWord()}分鐘`]: route ? Math.round(route.seconds / 60) : null }),
+    地址: p.shortFormattedAddress,
+  };
+}
+
+function searchContext() {
+  const when = !state.when ? '現在出發' : `${isArrive() ? '預計' : ''}${whenWord()}${isArrive() ? ' 抵達' : ' 出發'}`;
+  const where = state.view === 'route' && state.route
+    ? `順路：從 ${state.route.a.label} 到 ${state.route.b.label}，候選都是沿路的地點`
+    : `位置：${state.origin?.label?.replace(/^\S+\s/, '') || '未知'} 附近`;
+  return `正在找：${queryName(state.query)}\n${where}\n交通：${modeWord()}\n時間：${when}（現在是 ${new Date().toLocaleString('zh-TW', { weekday: 'long', hour: '2-digit', minute: '2-digit' })}）`;
+}
+
+async function aiPick() {
+  if (!requireClaudeKey()) return;
+  const candidates = visiblePlaces().slice(0, 20);
+  if (!candidates.length) return;
+  const btn = $('#ai-pick');
+  const box = $('#ai-box');
+  btn.disabled = true;
+  btn.textContent = 'AI 思考中…';
+  try {
+    const res = await ai.recommend({
+      apiKey: state.claudeKey,
+      party: state.party,
+      context: searchContext(),
+      places: candidates.map(placeForAi),
+    });
+    const byId = new Map(candidates.map((p) => [p.id, p]));
+    const picks = res.picks.filter((x) => byId.has(x.id));
+    state.aiPicks = new Map(picks.map((x) => [x.id, x.reason]));
+    box.innerHTML = `<div>${esc(res.summary)}</div>`
+      + `<ol>${picks.map((x) => `<li>${esc(byId.get(x.id).displayName?.text)}</li>`).join('')}</ol>`
+      + (res.tips ? `<p class="tip">${esc(res.tips)}</p>` : '');
+    box.hidden = false;
+    renderList();
+  } catch (err) {
+    toast(`AI 推薦失敗：${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'AI 幫我挑';
+  }
+}
+
+// ---------- AI 行程 ----------
+// 給 AI 的搜尋工具：用 Google 搜尋真實地點並整理成精簡資料
+async function searchForPlan(center, date, query, near) {
+  const base = near ? await geocodeCached(near) : center;
+  const raw = await api.searchText(state.key, query, base, 5000);
+  return raw.filter((p) => p.location).slice(0, 8).map((p) => {
+    const loc = { lat: p.location.latitude, lng: p.location.longitude };
+    return {
+      name: p.displayName?.text,
+      rating: p.rating ?? null,
+      reviews: p.userRatingCount ?? 0,
+      type: p.primaryTypeDisplayName?.text || null,
+      address: p.shortFormattedAddress,
+      km_from_start: Math.round(haversine(center, loc) / 100) / 10,
+      hours_that_day: hoursOn(p, date),
+      mapsUrl: p.googleMapsUri,
+    };
+  });
+}
+
+// 簡易排版：## 標題、- 清單、**粗體**，並把查過的地點名稱變成地圖連結
+function renderPlan(text, places) {
+  const names = [...places.keys()].filter(Boolean).sort((a, b) => b.length - a.length);
+  const inline = (s) => {
+    let html = esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    for (const n of names) {
+      const safe = esc(n);
+      if (html.includes(safe)) html = html.split(safe).join(`<a href="${esc(places.get(n))}" target="_blank" rel="noopener">${safe}</a>`);
+    }
+    return html;
+  };
+  let out = '';
+  let inList = false;
+  for (const line of text.split('\n')) {
+    const t = line.trim();
+    const isItem = /^[-•]\s+/.test(t);
+    if (inList && !isItem) { out += '</ul>'; inList = false; }
+    if (!t) continue;
+    if (/^#{1,4}\s/.test(t)) out += `<h3>${inline(t.replace(/^#+\s*/, ''))}</h3>`;
+    else if (isItem) {
+      if (!inList) { out += '<ul>'; inList = true; }
+      out += `<li>${inline(t.replace(/^[-•]\s+/, ''))}</li>`;
+    } else out += `<p>${inline(t)}</p>`;
+  }
+  if (inList) out += '</ul>';
+  return out;
+}
+
+async function planTrip(e) {
+  e.preventDefault();
+  if (!requireKey() || !requireClaudeKey()) return;
+  const center = state.origin;
+  if (!center) return toast('請先定位或輸入出發地址');
+  const request = $('#plan-request').value.trim();
+  const day = Number($('#plan-day').value);
+  const start = $('#plan-start').value || '10:00';
+  const end = $('#plan-end').value || '18:00';
+  const date = new Date();
+  date.setDate(date.getDate() + day);
+  const dateText = date.toLocaleDateString('zh-TW', { month: 'long', day: 'numeric', weekday: 'long' });
+
+  const prompt = [
+    `出發地：${center.label.replace(/^\S+\s/, '')}（緯度 ${center.lat.toFixed(5)}，經度 ${center.lng.toFixed(5)}）`,
+    `日期：${dateText}，${start} 到 ${end}`,
+    `交通：${modeWord()}`,
+    `同行成員：${ai.partyText(state.party)}`,
+    `需求：${request || '沒有特別需求，請安排輕鬆好玩的一天'}`,
+  ].join('\n');
+
+  const btn = $('#plan-go');
+  const out = $('#plan-output');
+  btn.disabled = true;
+  out.hidden = false;
+  out.classList.remove('done');
+  out.textContent = '';
+  try {
+    const res = await ai.planTrip({
+      apiKey: state.claudeKey,
+      prompt,
+      searchPlaces: (query, near) => searchForPlan(center, date, query, near),
+      onTurn: () => { out.textContent = ''; },
+      onText: (t) => { out.textContent += t; $('#plan-status').textContent = 'AI 撰寫中…'; },
+      onStatus: (s) => { $('#plan-status').textContent = s; },
+    });
+    out.innerHTML = renderPlan(res.text, res.places);
+    out.classList.add('done');
+    $('#plan-status').textContent = `完成！點地點名稱可以開 Google 地圖（查了 ${res.places.size} 個地點）`;
+  } catch (err) {
+    $('#plan-status').textContent = `規劃失敗：${err.message}`;
+    if (!out.textContent) out.hidden = true;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ---------- 事件 ----------
@@ -537,6 +746,7 @@ function bind() {
     state.view = b.dataset.view;
     savePrefs();
     syncControls();
+    if (state.view === 'plan') return;
     state.places = [];
     renderList();
     if (state.view === 'route' && !$('#route-b').value.trim()) {
@@ -640,8 +850,44 @@ function bind() {
   $('#settings-form').addEventListener('submit', (e) => {
     if (e.submitter?.value !== 'save') return;
     state.key = $('#api-key').value.trim();
+    state.claudeKey = $('#claude-key').value.trim();
     savePrefs();
-    toast(state.key ? '金鑰已儲存' : '金鑰已清除');
+    toast('設定已儲存');
+  });
+
+  $('#ai-pick').addEventListener('click', aiPick);
+  $('#plan-ui').addEventListener('submit', planTrip);
+
+  $('#open-party').addEventListener('click', openParty);
+  $('#party-form').addEventListener('click', (e) => {
+    const step = e.target.closest('[data-step]');
+    if (step) {
+      const field = step.parentElement.dataset.field;
+      partyDraft[field] = Math.max(0, Math.min(20, partyDraft[field] + Number(step.dataset.step)));
+      return renderPartyForm();
+    }
+    const add = e.target.closest('[data-add]');
+    if (add) {
+      partyDraft[add.dataset.add].push(add.dataset.add === 'kids' ? 6 : 1);
+      return renderPartyForm();
+    }
+    const remove = e.target.closest('[data-remove]');
+    if (remove) {
+      partyDraft[remove.dataset.remove].splice(Number(remove.dataset.i), 1);
+      renderPartyForm();
+    }
+  });
+  $('#party-form').addEventListener('change', (e) => {
+    const sel = e.target.closest('select[data-group]');
+    if (sel) partyDraft[sel.dataset.group][Number(sel.dataset.i)] = Number(sel.value);
+  });
+  $('#party-form').addEventListener('submit', (e) => {
+    if (e.submitter?.value !== 'save') return;
+    partyDraft.note = $('#party-note').value.trim();
+    state.party = partyDraft;
+    savePrefs();
+    syncPartyButton();
+    toast(`同行成員已更新：${ai.partyText(state.party)}`);
   });
 }
 
@@ -650,6 +896,7 @@ function init() {
   renderCategories();
   syncControls();
   syncWhen();
+  syncPartyButton();
   bind();
   renderList();
   locateMe();

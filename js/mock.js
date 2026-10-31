@@ -1,5 +1,6 @@
 // 測試模式（網址加 ?mock）：不呼叫 Google，產生假資料，方便沒有金鑰時測介面
 import { isOpenAt } from './hours.js';
+import { partyText } from './ai.js';
 
 const SAMPLES = [
   ['阿明牛肉麵', 'restaurant', '餐廳', 'PRICE_LEVEL_INEXPENSIVE'],
@@ -111,3 +112,26 @@ function dist(a, b) {
   const dy = (a.lat - b.lat) * 111000;
   return Math.hypot(dx, dy);
 }
+
+// 假的 AI：挑前三間、排一個固定格式的行程（會實際呼叫一次搜尋工具）
+export const ai = {
+  partyText,
+  async recommend({ party, places }) {
+    await sleep(500);
+    return {
+      summary: `（測試）依「${partyText(party)}」挑了 ${Math.min(3, places.length)} 間。`,
+      picks: places.slice(0, 3).map((p) => ({ id: p.id, reason: `評分 ${p.評分}，適合全家` })),
+      tips: '假日中午人多，建議提早出發。',
+    };
+  },
+  async planTrip({ searchPlaces, onTurn, onText, onStatus }) {
+    onTurn();
+    onStatus('AI 正在搜尋：親子館');
+    const list = await searchPlaces('親子館', '');
+    const places = new Map(list.map((p) => [p.name, p.mapsUrl]));
+    onTurn();
+    const text = `## 行程總覽\n（測試）輕鬆的室內行程。\n## 時間軸\n**10:00–11:30｜${list[0].name}**\n- 適合小孩放電\n- 下一站開車約 10 分\n**12:00–13:00｜${list[1].name}**\n- 午餐\n## 注意事項\n- 記得帶水壺`;
+    for (const ch of text.match(/.{1,20}/gs)) { onText(ch); await sleep(20); }
+    return { text, places };
+  },
+};

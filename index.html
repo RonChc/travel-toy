@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f766e">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="color-scheme" content="light">
   <title>旅遊玩意</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -17,58 +18,56 @@
     <div class="title-row">
       <h1>旅遊玩意</h1>
       <span class="mock-badge">測試模式</span>
+      <button id="open-party" class="party-btn" aria-label="同行成員">👨‍👩‍👧 <span id="party-summary">同行</span></button>
       <button id="open-settings" class="icon-btn" aria-label="設定">⚙️</button>
     </div>
 
     <div class="view-tabs" role="tablist">
-      <button class="view-btn" data-view="nearby">📍 附近</button>
-      <button class="view-btn" data-view="route">🛣️ 順路</button>
+      <button class="view-btn" data-view="nearby">附近</button>
+      <button class="view-btn" data-view="route">順路</button>
+      <button class="view-btn" data-view="plan">AI 行程</button>
     </div>
 
     <div id="nearby-panel" class="panel">
       <div class="origin">
         <span id="origin-label">尚未設定位置</span>
-        <button id="locate" class="small-btn">重新定位</button>
+        <button id="locate" class="link-btn">重新定位</button>
       </div>
-      <form id="address-form" class="address-form">
-        <input id="address" type="search" placeholder="或輸入地址、地標…" enterkeyhint="search" autocomplete="off">
-        <button type="submit" class="small-btn">搜尋</button>
+      <form id="address-form" class="row-form">
+        <input id="address" type="search" placeholder="或輸入地址、地標" enterkeyhint="search" autocomplete="off">
       </form>
     </div>
 
-    <form id="route-form" class="panel route-panel" hidden>
-      <div class="route-rows">
-        <label class="route-row"><span class="pin">A</span>
-          <input id="route-a" type="search" placeholder="起點（空白 = 目前位置）" autocomplete="off" enterkeyhint="next">
-        </label>
-        <label class="route-row"><span class="pin pin-b">B</span>
-          <input id="route-b" type="search" placeholder="終點地址或地標" autocomplete="off" enterkeyhint="go">
-        </label>
-      </div>
+    <form id="route-form" class="panel" hidden>
+      <label class="route-row"><span class="pin">A</span>
+        <input id="route-a" type="search" placeholder="起點（空白 = 目前位置）" autocomplete="off" enterkeyhint="next">
+      </label>
+      <label class="route-row"><span class="pin pin-b">B</span>
+        <input id="route-b" type="search" placeholder="終點地址或地標" autocomplete="off" enterkeyhint="go">
+      </label>
       <button type="submit" hidden></button>
       <p id="route-summary" class="route-summary"></p>
     </form>
 
     <div class="mode" role="group" aria-label="交通方式">
-      <button class="mode-btn" data-mode="DRIVE">🚗 開車</button>
-      <button class="mode-btn" data-mode="WALK">🚶 走路</button>
+      <button class="mode-btn" data-mode="DRIVE">開車</button>
+      <button class="mode-btn" data-mode="WALK">走路</button>
     </div>
   </header>
 
   <main>
-    <form id="kw-form" class="kw-form">
-      <input id="kw" type="search" placeholder="🔍 搜尋關鍵字，例如：牛肉湯" enterkeyhint="search" autocomplete="off">
-      <button type="submit" class="small-btn">找</button>
-    </form>
+    <div id="search-ui">
+      <form id="kw-form" class="row-form">
+        <input id="kw" type="search" placeholder="搜尋關鍵字，例如：牛肉湯" enterkeyhint="search" autocomplete="off">
+      </form>
 
-    <nav id="categories" class="categories"></nav>
+      <nav id="categories" class="categories"></nav>
 
-    <section class="filters">
-      <div class="when">
+      <section class="filters" aria-label="篩選">
         <select id="when-type" aria-label="出發或抵達時間">
-          <option value="">🕒 現在出發</option>
-          <option value="depart">🕒 幾點出發</option>
-          <option value="arrive">🕒 幾點抵達</option>
+          <option value="">現在出發</option>
+          <option value="depart">幾點出發</option>
+          <option value="arrive">幾點抵達</option>
         </select>
         <select id="when-day" aria-label="哪一天" hidden>
           <option value="0">今天</option>
@@ -76,54 +75,66 @@
           <option value="2">後天</option>
         </select>
         <input id="when-time" type="time" step="900" aria-label="幾點" hidden>
-      </div>
-      <label id="detour-wrap" hidden>繞路上限
-        <select id="detour">
-          <option value="300">5 分鐘內</option>
-          <option value="600">10 分鐘內</option>
-          <option value="900">15 分鐘內</option>
-          <option value="1200">20 分鐘內</option>
-          <option value="1800">30 分鐘內</option>
+        <select id="detour" aria-label="繞路上限" hidden>
+          <option value="300">繞路 5 分內</option>
+          <option value="600">繞路 10 分內</option>
+          <option value="900">繞路 15 分內</option>
+          <option value="1200">繞路 20 分內</option>
+          <option value="1800">繞路 30 分內</option>
         </select>
-      </label>
-      <label id="radius-wrap">範圍
-        <select id="radius">
-          <option value="500">500 公尺</option>
-          <option value="1000">1 公里</option>
-          <option value="3000">3 公里</option>
-          <option value="5000">5 公里</option>
-          <option value="10000">10 公里</option>
-          <option value="20000">20 公里</option>
+        <select id="radius" aria-label="範圍">
+          <option value="500">500 公尺內</option>
+          <option value="1000">1 公里內</option>
+          <option value="3000">3 公里內</option>
+          <option value="5000">5 公里內</option>
+          <option value="10000">10 公里內</option>
+          <option value="20000">20 公里內</option>
         </select>
-      </label>
-      <label>評分
-        <select id="min-rating">
-          <option value="0">不限</option>
-          <option value="3.5">3.5 以上</option>
-          <option value="4">4.0 以上</option>
-          <option value="4.3">4.3 以上</option>
-          <option value="4.5">4.5 以上</option>
+        <select id="min-rating" aria-label="最低評分">
+          <option value="0">評分不限</option>
+          <option value="3.5">3.5 星以上</option>
+          <option value="4">4.0 星以上</option>
+          <option value="4.3">4.3 星以上</option>
+          <option value="4.5">4.5 星以上</option>
         </select>
-      </label>
-      <label>評論數
-        <select id="min-reviews">
-          <option value="0">不限</option>
+        <select id="min-reviews" aria-label="最少評論數">
+          <option value="0">評論數不限</option>
           <option value="20">20 則以上</option>
           <option value="100">100 則以上</option>
           <option value="500">500 則以上</option>
           <option value="1000">1000 則以上</option>
         </select>
-      </label>
-      <label>排序
-        <select id="sort"></select>
-      </label>
-      <label class="check"><input id="open-only" type="checkbox"> 只看營業中</label>
-    </section>
+        <select id="sort" aria-label="排序"></select>
+        <label class="check"><input id="open-only" type="checkbox"> 營業中</label>
+      </section>
 
-    <p id="status" class="status" aria-live="polite"></p>
-    <div id="chips" class="chips" hidden></div>
-    <ul id="results" class="results"></ul>
-    <button id="more" class="more-btn" hidden>再顯示 10 間</button>
+      <div class="status-row">
+        <p id="status" class="status" aria-live="polite"></p>
+        <button id="ai-pick" class="ai-btn" hidden>AI 幫我挑</button>
+      </div>
+      <div id="ai-box" class="ai-box" hidden></div>
+      <div id="chips" class="chips" hidden></div>
+      <ul id="results" class="results"></ul>
+      <button id="more" class="more-btn" hidden>再顯示 10 間</button>
+    </div>
+
+    <form id="plan-ui" class="plan" hidden>
+      <p class="plan-hint">AI 會從上面的位置出發，依同行成員幫你排行程，地點都是 Google 地圖上查得到的。</p>
+      <div class="plan-time">
+        <select id="plan-day" aria-label="哪一天">
+          <option value="0">今天</option>
+          <option value="1">明天</option>
+          <option value="2">後天</option>
+        </select>
+        <input id="plan-start" type="time" step="900" value="10:00" aria-label="開始時間">
+        <span>到</span>
+        <input id="plan-end" type="time" step="900" value="18:00" aria-label="結束時間">
+      </div>
+      <textarea id="plan-request" rows="3" placeholder="想要什麼樣的行程？例如：下雨天，想去室內景點，午餐想吃在地小吃"></textarea>
+      <button id="plan-go" type="submit" class="primary-btn">開始規劃</button>
+      <p id="plan-status" class="status" aria-live="polite"></p>
+      <article id="plan-output" class="plan-output" hidden></article>
+    </form>
   </main>
 
   <dialog id="settings">
@@ -131,10 +142,38 @@
       <h2>設定</h2>
       <label for="api-key">Google API 金鑰</label>
       <input id="api-key" type="text" autocomplete="off" spellcheck="false" placeholder="AIza…">
-      <p class="hint">金鑰只存在這台手機。需開通 Places API (New) 與 Routes API。</p>
+      <label for="claude-key">Claude API 金鑰（AI 功能用，可不填）</label>
+      <input id="claude-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+      <p class="hint">金鑰只存在這台手機。Claude 金鑰無法限制網址，建議到 Claude Console 設定每月花費上限。</p>
       <div class="dialog-actions">
-        <button value="cancel" formnovalidate class="small-btn ghost">取消</button>
-        <button value="save" class="small-btn">儲存</button>
+        <button value="cancel" formnovalidate class="ghost-btn">取消</button>
+        <button value="save" class="primary-btn">儲存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="party">
+    <form id="party-form" method="dialog">
+      <h2>同行成員</h2>
+      <div class="stepper-row"><span>大人</span>
+        <div class="stepper" data-field="adults"><button type="button" data-step="-1">−</button><b>2</b><button type="button" data-step="1">＋</button></div>
+      </div>
+      <div class="stepper-row"><span>長輩</span>
+        <div class="stepper" data-field="seniors"><button type="button" data-step="-1">−</button><b>0</b><button type="button" data-step="1">＋</button></div>
+      </div>
+      <div class="age-group">
+        <div class="age-head"><span>小孩（3～12 歲）</span><button type="button" class="link-btn" data-add="kids">＋ 新增</button></div>
+        <div class="age-list" data-list="kids"></div>
+      </div>
+      <div class="age-group">
+        <div class="age-head"><span>幼兒（0～2 歲）</span><button type="button" class="link-btn" data-add="babies">＋ 新增</button></div>
+        <div class="age-list" data-list="babies"></div>
+      </div>
+      <label for="party-note">其他需求</label>
+      <input id="party-note" type="text" placeholder="例如：推嬰兒車、吃素、長輩不能爬樓梯">
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="ghost-btn">取消</button>
+        <button value="save" class="primary-btn">儲存</button>
       </div>
     </form>
   </dialog>

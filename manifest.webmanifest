@@ -1,12 +1,12 @@
-{
+﻿{
   "name": "旅遊玩意",
   "short_name": "旅遊玩意",
   "description": "找附近的吃的、玩的、停車場和廁所",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f5f7f6",
-  "theme_color": "#0f766e",
+  "background_color": "#f6f7f9",
+  "theme_color": "#ffffff",
   "lang": "zh-Hant-TW",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },

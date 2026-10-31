@@ -20,5 +20,17 @@ export function isOpenAt(place, date) {
   });
 }
 
+// 某天的營業時段文字，例如「11:00–14:00、17:00–21:00」；沒資料回傳 null，當天沒開回傳「公休」
+export function hoursOn(place, date) {
+  const periods = place.regularOpeningHours?.periods;
+  if (!periods?.length) return null;
+  if (periods.length === 1 && !periods[0].close) return '24 小時營業';
+  const pad = (n) => String(n ?? 0).padStart(2, '0');
+  const slots = periods
+    .filter((p) => p.open?.day === date.getDay())
+    .map((p) => `${pad(p.open.hour)}:${pad(p.open.minute)}–${p.close ? `${pad(p.close.hour)}:${pad(p.close.minute)}` : '隔天'}`);
+  return slots.length ? slots.join('、') : '公休';
+}
+
 export const fmtClock = (date) =>
   `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
