@@ -5,34 +5,44 @@ import * as mockApi from './mock.js';
 
 const MOCK = new URLSearchParams(location.search).has('mock');
 const api = MOCK ? mockApi : realApi;
-const MAX_CANDIDATES = 25; // 送去算路程的最多筆數（依直線距離取最近）
+const MAX_CANDIDATES = 25; // 附近模式送去算路程的最多筆數（依直線距離取最近）
+
+const SORTS = {
+  nearby: [['distance', '由近到遠'], ['fastest', '最快抵達'], ['rating', '評分高到低'], ['reviews', '評論數多到少']],
+  route: [['detour', '繞路最少'], ['rating', '評分高到低'], ['reviews', '評論數多到少'], ['order', '沿路先到']],
+};
 
 const $ = (sel) => document.querySelector(sel);
 
 // ---------- 偏好設定（只存在這台手機） ----------
 const PREF_KEY = 'travel-toy-prefs';
+const PREF_FIELDS = ['key', 'view', 'mode', 'radius', 'maxDetour', 'minRating', 'minReviews', 'openOnly', 'sortNearby', 'sortRoute'];
 function loadPrefs() {
   try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; }
 }
 function savePrefs() {
-  const { key, mode, radius, minRating, minReviews, openOnly, sort } = state;
-  try {
-    localStorage.setItem(PREF_KEY, JSON.stringify({ key, mode, radius, minRating, minReviews, openOnly, sort }));
-  } catch { /* 無痕模式等情況存不了，略過 */ }
+  const out = Object.fromEntries(PREF_FIELDS.map((k) => [k, state[k]]));
+  try { localStorage.setItem(PREF_KEY, JSON.stringify(out)); } catch { /* 無痕模式等情況存不了，略過 */ }
 }
 
 const state = {
-  key: '', mode: 'DRIVE', radius: 3000, minRating: 0, minReviews: 0, openOnly: false, sort: 'distance',
+  key: '', view: 'nearby', mode: 'DRIVE', radius: 3000, maxDetour: 600,
+  minRating: 0, minReviews: 0, openOnly: false, sortNearby: 'distance', sortRoute: 'detour',
   ...loadPrefs(),
-  origin: null,
-  category: null,
+  here: null, // GPS 目前位置
+  origin: null, // 附近模式的中心點
+  route: null, // 順路模式：{ a, b, seconds, meters, polyline, mode }
+  query: null, // { cat } 或 { text }
+  food: false,
   places: [],
-  routes: { DRIVE: new Map(), WALK: new Map() },
+  routes: { DRIVE: new Map(), WALK: new Map() }, // 附近模式的路程時間快取
   showCount: 10,
   searchId: 0,
   cuisine: null, // 吃的類別：選定的料理類型
   kind: null, // 吃的類別：「餐廳」或「小吃店」
 };
+
+const sortKey = () => (state.view === 'route' ? 'sortRoute' : 'sortNearby');
 
 // ---------- 工具 ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -50,6 +60,8 @@ function fmtTime(sec) {
   const min = Math.max(1, Math.round(sec / 60));
   return min < 60 ? `${min} 分` : `${Math.floor(min / 60)} 小時 ${min % 60} 分`;
 }
+const modeIcon = () => (state.mode === 'DRIVE' ? '🚗' : '🚶');
+const modeWord = () => (state.mode === 'DRIVE' ? '開車' : '走路');
 
 function toast(msg) {
   const el = $('#toast');
@@ -66,19 +78,24 @@ function requireKey() {
   return false;
 }
 
+const queryName = (q) => (q.cat ? q.cat.name : `「${q.text}」`);
+const isFoodPlace = (p) => (p.types || []).some((t) => /restaurant|meal_|food|cafe|bakery/.test(t));
+
 // ---------- 定位 ----------
 function setOrigin(origin) {
   state.origin = origin;
-  state.routes = { DRIVE: new Map(), WALK: new Map() };
   $('#origin-label').textContent = origin.label;
-  if (state.category) runSearch();
+  if (state.query && state.view === 'nearby') runSearch();
 }
 
 function locateMe() {
   if (!navigator.geolocation) return toast('這個瀏覽器不支援定位');
   $('#origin-label').textContent = '定位中…';
   navigator.geolocation.getCurrentPosition(
-    (pos) => setOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude, label: '📍 目前位置' }),
+    (pos) => {
+      state.here = { lat: pos.coords.latitude, lng: pos.coords.longitude, label: '📍 目前位置' };
+      setOrigin(state.here);
+    },
     (err) => {
       $('#origin-label').textContent = state.origin?.label || '尚未設定位置';
       toast(err.code === 1 ? '沒有定位權限，請改用輸入地址' : '定位失敗，請再試一次或輸入地址');
@@ -102,8 +119,52 @@ async function searchAddress(e) {
   }
 }
 
+const geoCache = new Map();
+async function geocodeCached(text) {
+  if (!geoCache.has(text)) geoCache.set(text, await api.geocode(state.key, text));
+  return geoCache.get(text);
+}
+
+// 順路模式：取得 A→B 路線（A 留空 = 目前位置），輸入沒變就沿用
+async function ensureRoute() {
+  const aText = $('#route-a').value.trim();
+  const bText = $('#route-b').value.trim();
+  if (!bText) throw new Error('請輸入終點 B');
+  let a;
+  if (aText) a = { ...(await geocodeCached(aText)), text: aText };
+  else if (state.here) a = { ...state.here, label: '目前位置', text: '' };
+  else throw new Error('還沒定位到目前位置，請輸入起點 A');
+  const b = { ...(await geocodeCached(bText)), text: bText };
+
+  const r = state.route;
+  if (r && r.mode === state.mode && r.a.text === a.text && r.b.text === b.text
+    && r.a.lat === a.lat && r.a.lng === a.lng) return r;
+  const res = await api.computeRoute(state.key, a, b, state.mode);
+  state.route = { ...res, a, b, mode: state.mode };
+  renderRouteSummary();
+  return state.route;
+}
+
+function renderRouteSummary() {
+  const r = state.route;
+  $('#route-summary').textContent = r
+    ? `${r.a.label} → ${r.b.label}：${modeIcon()} ${fmtTime(r.seconds)}・${fmtDist(r.meters)}`
+    : '';
+}
+
 // ---------- 搜尋 ----------
-async function fetchCategory(cat, origin, radius) {
+async function settle(jobs) {
+  const results = await Promise.allSettled(jobs);
+  const ok = results.filter((r) => r.status === 'fulfilled');
+  if (!ok.length) throw results[0].reason;
+  const byId = new Map();
+  for (const r of ok) for (const p of r.value) if (p.location && !byId.has(p.id)) byId.set(p.id, p);
+  return [...byId.values()];
+}
+
+function fetchNearby(q, origin, radius) {
+  if (q.text) return settle([api.searchText(state.key, q.text, origin, radius)]);
+  const cat = q.cat;
   const jobs = [];
   if (cat.types) {
     jobs.push(api.searchNearby(state.key, origin, radius, cat.types).catch((err) => {
@@ -111,60 +172,92 @@ async function fetchCategory(cat, origin, radius) {
       return api.searchNearby(state.key, origin, radius, cat.fallbackTypes);
     }));
   }
-  for (const q of cat.queries || []) jobs.push(api.searchText(state.key, q, origin, radius));
+  for (const t of cat.queries || []) jobs.push(api.searchText(state.key, t, origin, radius));
+  return settle(jobs);
+}
 
-  const results = await Promise.allSettled(jobs);
-  const ok = results.filter((r) => r.status === 'fulfilled');
-  if (!ok.length) throw results[0].reason;
+function fetchAlong(q, route) {
+  const texts = q.text ? [q.text] : (q.cat.queries || q.cat.alongQueries || [q.cat.name]);
+  return settle(texts.map((t) => api.searchAlongRoute(state.key, t, route.polyline, route.a, state.mode)));
+}
 
-  const byId = new Map();
-  for (const r of ok) for (const p of r.value) if (p.location && !byId.has(p.id)) byId.set(p.id, p);
-  return [...byId.values()];
+function startSearch(query) {
+  state.query = query;
+  renderCategories();
+  runSearch();
+  $('#status').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function runSearch() {
-  const cat = state.category;
-  if (!cat) return;
-  if (!state.origin) return toast('請先定位或輸入地址');
+  const q = state.query;
+  if (!q) return;
   if (!requireKey()) return;
-
   const id = ++state.searchId;
-  const origin = state.origin;
   state.places = [];
   state.showCount = 10;
   state.cuisine = null;
   state.kind = null;
   state.routes = { DRIVE: new Map(), WALK: new Map() };
-  setStatus(`搜尋「${cat.name}」中…`);
   renderList();
 
   try {
-    const raw = await fetchCategory(cat, origin, state.radius);
-    if (id !== state.searchId) return;
-    state.places = raw
-      .map((p) => {
-        const loc = { lat: p.location.latitude, lng: p.location.longitude };
-        const food = cat.food ? { cuisine: cuisineLabel(p), kind: shopKind(p) } : {};
-        return { ...p, ...food, loc, straight: haversine(origin, loc) };
-      })
-      .filter((p) => p.straight <= state.radius)
-      .sort((a, b) => a.straight - b.straight)
-      .slice(0, MAX_CANDIDATES);
-    renderList();
-    await ensureRoutes(id);
+    if (state.view === 'route') await searchRoute(id, q);
+    else await searchNearbyPlaces(id, q);
   } catch (err) {
     if (id !== state.searchId) return;
     setStatus(`搜尋失敗：${err.message}`);
   }
 }
 
-// 算目前交通方式的路程時間（每種方式只算一次）
+function annotateFood(q, places) {
+  state.food = q.cat ? !!q.cat.food : places.filter(isFoodPlace).length > places.length / 2;
+  if (!state.food) return places;
+  return places.map((p) => ({ ...p, cuisine: cuisineLabel(p), kind: shopKind(p) }));
+}
+
+async function searchNearbyPlaces(id, q) {
+  const origin = state.origin;
+  if (!origin) throw new Error('請先定位或輸入地址');
+  setStatus(`搜尋${queryName(q)}中…`);
+  const raw = await fetchNearby(q, origin, state.radius);
+  if (id !== state.searchId) return;
+  const places = raw
+    .map((p) => {
+      const loc = { lat: p.location.latitude, lng: p.location.longitude };
+      return { ...p, loc, straight: haversine(origin, loc) };
+    })
+    .filter((p) => p.straight <= state.radius)
+    .sort((a, b) => a.straight - b.straight)
+    .slice(0, MAX_CANDIDATES);
+  state.places = annotateFood(q, places);
+  renderList();
+  await ensureRoutes(id);
+}
+
+async function searchRoute(id, q) {
+  setStatus('規劃路線中…');
+  const route = await ensureRoute();
+  if (id !== state.searchId) return;
+  setStatus(`沿路搜尋${queryName(q)}中…`);
+  const raw = await fetchAlong(q, route);
+  if (id !== state.searchId) return;
+  const places = raw.map((p) => {
+    const loc = { lat: p.location.latitude, lng: p.location.longitude };
+    const [toPlace, toEnd] = p.legs || [];
+    const detour = toPlace && toEnd ? Math.max(0, toPlace.seconds + toEnd.seconds - route.seconds) : null;
+    return { ...p, loc, straight: haversine(route.a, loc), toPlace, detour };
+  });
+  state.places = annotateFood(q, places);
+  renderList();
+}
+
+// 附近模式：算目前交通方式的路程時間（每種方式只算一次）
 async function ensureRoutes(id = state.searchId) {
   const mode = state.mode;
   const cache = state.routes[mode];
   const todo = state.places.filter((p) => !cache.has(p.id));
   if (!todo.length) return renderList();
-  setStatus(`計算${mode === 'DRIVE' ? '開車' : '走路'}時間中…`);
+  setStatus(`計算${modeWord()}時間中…`);
   try {
     const res = await api.routeMatrix(state.key, state.origin, todo.map((p) => p.loc), mode);
     if (id !== state.searchId) return;
@@ -181,12 +274,13 @@ function setStatus(text) {
   $('#status').textContent = text;
 }
 
-// 評分、評論數、營業中篩選（不含料理類型）
+// 評分、評論數、營業中、順路繞路上限（不含料理類型）
 function baseFiltered() {
   return state.places.filter((p) =>
     (p.rating || 0) >= state.minRating &&
     (p.userRatingCount || 0) >= state.minReviews &&
-    (!state.openOnly || p.currentOpeningHours?.openNow === true));
+    (!state.openOnly || p.currentOpeningHours?.openNow === true) &&
+    (state.view !== 'route' || p.detour === null || p.detour <= state.maxDetour));
 }
 
 function visiblePlaces() {
@@ -196,22 +290,43 @@ function visiblePlaces() {
     (!state.kind || p.kind === state.kind));
 
   const time = (p) => cache.get(p.id)?.seconds ?? Infinity;
+  const byRating = (a, b) => (b.rating || 0) - (a.rating || 0) || (b.userRatingCount || 0) - (a.userRatingCount || 0);
   const sorters = {
     distance: (a, b) => (cache.get(a.id)?.meters ?? a.straight) - (cache.get(b.id)?.meters ?? b.straight),
     fastest: (a, b) => time(a) - time(b) || a.straight - b.straight,
-    rating: (a, b) => (b.rating || 0) - (a.rating || 0) || (b.userRatingCount || 0) - (a.userRatingCount || 0),
+    rating: byRating,
     reviews: (a, b) => (b.userRatingCount || 0) - (a.userRatingCount || 0),
+    detour: (a, b) => (a.detour ?? Infinity) - (b.detour ?? Infinity) || byRating(a, b),
+    order: (a, b) => (a.toPlace?.seconds ?? Infinity) - (b.toPlace?.seconds ?? Infinity),
   };
-  return list.sort(sorters[state.sort]);
+  return list.sort(sorters[state[sortKey()]] || sorters.rating);
+}
+
+function travelLine(p) {
+  if (state.view === 'route') {
+    if (p.detour === null) return `距起點直線 ${fmtDist(p.straight)}`;
+    return `繞路 +${fmtTime(p.detour)}・${modeIcon()} 出發後 ${fmtTime(p.toPlace.seconds)} 到`;
+  }
+  const route = state.routes[state.mode].get(p.id);
+  if (route) return `${fmtDist(route.meters)} · ${modeIcon()} ${fmtTime(route.seconds)}`;
+  return `直線 ${fmtDist(p.straight)}${state.routes[state.mode].has(p.id) ? ` · ${modeIcon()} 無路線` : ''}`;
+}
+
+function navUrl(p) {
+  const travelmode = state.mode === 'DRIVE' ? 'driving' : 'walking';
+  if (state.view === 'route' && state.route) {
+    const { a, b } = state.route;
+    return `https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lng}&destination=${b.lat},${b.lng}`
+      + `&waypoints=${p.loc.lat},${p.loc.lng}&travelmode=${travelmode}`;
+  }
+  return `https://www.google.com/maps/dir/?api=1&destination=${p.loc.lat},${p.loc.lng}`
+    + `&destination_place_id=${encodeURIComponent(p.id)}&travelmode=${travelmode}`;
 }
 
 function card(p) {
-  const cat = state.category;
-  const route = state.routes[state.mode].get(p.id);
-  const modeWord = state.mode === 'DRIVE' ? '🚗' : '🚶';
   const open = p.currentOpeningHours?.openNow;
   const tags = [];
-  if (cat.food) {
+  if (p.cuisine) {
     tags.push(`<span class="tag tag-cuisine">${esc(p.cuisine)}</span>`);
     tags.push(`<span class="tag ${p.kind === '小吃店' ? 'tag-snack' : 'tag-rest'}">${p.kind}</span>`);
   } else if (p.primaryTypeDisplayName?.text) {
@@ -223,28 +338,23 @@ function card(p) {
   const rating = p.rating
     ? `<span class="rating">★ ${p.rating.toFixed(1)}</span><span class="count">(${(p.userRatingCount || 0).toLocaleString()})</span>`
     : '<span class="count">尚無評分</span>';
-  const travel = route
-    ? `${fmtDist(route.meters)} · ${modeWord} ${fmtTime(route.seconds)}`
-    : `直線 ${fmtDist(p.straight)}${state.routes[state.mode].has(p.id) ? ` · ${modeWord} 無路線` : ''}`;
-  const nav = `https://www.google.com/maps/dir/?api=1&destination=${p.loc.lat},${p.loc.lng}`
-    + `&destination_place_id=${encodeURIComponent(p.id)}&travelmode=${state.mode === 'DRIVE' ? 'driving' : 'walking'}`;
 
   return `<li class="card">
     <div class="card-main">
       <a class="name" href="${esc(p.googleMapsUri)}" target="_blank" rel="noopener">${esc(p.displayName?.text)}</a>
       <div class="meta">${rating}</div>
       <div class="tags">${tags.join('')}</div>
-      <div class="travel">${travel}</div>
+      <div class="travel">${travelLine(p)}</div>
       <div class="addr">${esc(p.shortFormattedAddress)}</div>
     </div>
-    <a class="nav-btn" href="${nav}" target="_blank" rel="noopener" aria-label="導航">導航</a>
+    <a class="nav-btn" href="${esc(navUrl(p))}" target="_blank" rel="noopener" aria-label="導航">導航</a>
   </li>`;
 }
 
 // 吃的類別：依目前結果產生「餐廳／小吃店」與料理類型的篩選按鈕
 function renderChips() {
   const bar = $('#chips');
-  if (!state.category?.food || !state.places.length) {
+  if (!state.food || !state.places.length) {
     bar.hidden = true;
     return;
   }
@@ -280,10 +390,10 @@ function renderList() {
   const list = $('#results');
   const more = $('#more');
   renderChips();
-  if (!state.category) {
+  if (!state.query) {
     list.innerHTML = '';
     more.hidden = true;
-    setStatus('選一個類別開始找');
+    setStatus(state.view === 'route' ? '輸入 A、B 點，再選類別或打關鍵字' : '選一個類別或打關鍵字開始找');
     return;
   }
   const all = visiblePlaces();
@@ -291,26 +401,37 @@ function renderList() {
   list.innerHTML = shown.map(card).join('');
   more.hidden = all.length <= state.showCount;
   if (state.places.length && !all.length) {
-    setStatus(state.cuisine || state.kind ? '這個類型沒有符合的，點「全部」看其他' : '沒有符合條件的地點，試著放寬評分或距離');
-  }
-  else if (state.places.length) {
-    setStatus(`${state.category.name}：符合 ${all.length} 間，顯示 ${shown.length} 間（${fmtDist(state.radius)}內）`);
+    setStatus(state.cuisine || state.kind
+      ? '這個類型沒有符合的，點「全部」看其他'
+      : `沒有符合條件的地點，試著放寬評分或${state.view === 'route' ? '繞路時間' : '距離'}`);
+  } else if (state.places.length) {
+    const scope = state.view === 'route' ? `繞路 ${state.maxDetour / 60} 分內` : `${fmtDist(state.radius)}內`;
+    setStatus(`${queryName(state.query)}：符合 ${all.length} 間，顯示 ${shown.length} 間（${scope}）`);
   }
 }
 
 function renderCategories() {
+  const activeId = state.query?.cat?.id;
   $('#categories').innerHTML = CATEGORIES.map((c) => `
-    <button class="cat${state.category?.id === c.id ? ' active' : ''}" data-id="${c.id}">
+    <button class="cat${activeId === c.id ? ' active' : ''}" data-id="${c.id}">
       <span class="cat-icon">${c.icon}</span><span>${c.name}</span>
     </button>`).join('');
 }
 
 function syncControls() {
   document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === state.mode));
+  document.querySelectorAll('.view-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
+  const route = state.view === 'route';
+  $('#nearby-panel').hidden = route;
+  $('#route-form').hidden = !route;
+  $('#radius-wrap').hidden = route;
+  $('#detour-wrap').hidden = !route;
+  $('#sort').innerHTML = SORTS[state.view].map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  $('#sort').value = state[sortKey()];
   $('#radius').value = String(state.radius);
+  $('#detour').value = String(state.maxDetour);
   $('#min-rating').value = String(state.minRating);
   $('#min-reviews').value = String(state.minReviews);
-  $('#sort').value = state.sort;
   $('#open-only').checked = state.openOnly;
 }
 
@@ -325,20 +446,56 @@ function bind() {
   $('#locate').addEventListener('click', locateMe);
   $('#address-form').addEventListener('submit', searchAddress);
 
+  document.querySelectorAll('.view-btn').forEach((b) => b.addEventListener('click', () => {
+    if (state.view === b.dataset.view) return;
+    state.view = b.dataset.view;
+    savePrefs();
+    syncControls();
+    state.places = [];
+    renderList();
+    if (state.view === 'route' && !$('#route-b').value.trim()) {
+      // 保留目前的類別／關鍵字，輸入 B 後按 Enter 就沿路搜尋
+      if (state.query) setStatus(`輸入終點 B 後按 Enter，沿路找${queryName(state.query)}`);
+      $('#route-b').focus();
+    } else {
+      runSearch();
+    }
+  }));
+
+  $('#route-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    document.activeElement?.blur();
+    if (state.query) runSearch();
+    else setStatus('選一個類別或打關鍵字，沿路幫你找');
+  });
+
+  $('#kw-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = $('#kw').value.trim();
+    if (!text) return;
+    $('#kw').blur();
+    startSearch({ text });
+  });
+
   $('#categories').addEventListener('click', (e) => {
     const btn = e.target.closest('.cat');
     if (!btn) return;
-    state.category = CATEGORIES.find((c) => c.id === btn.dataset.id);
-    renderCategories();
-    runSearch();
+    $('#kw').value = '';
+    startSearch({ cat: CATEGORIES.find((c) => c.id === btn.dataset.id) });
   });
 
   document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => {
+    if (state.mode === b.dataset.mode) return;
     state.mode = b.dataset.mode;
     savePrefs();
     syncControls();
-    renderList();
-    if (state.places.length) ensureRoutes();
+    if (state.view === 'route') {
+      // 順路的繞路時間跟交通方式有關，要重搜
+      if (state.query) runSearch();
+    } else {
+      renderList();
+      if (state.places.length) ensureRoutes();
+    }
   }));
 
   $('#radius').addEventListener('change', (e) => {
@@ -347,15 +504,16 @@ function bind() {
     runSearch();
   });
   const onFilter = () => {
+    state.maxDetour = Number($('#detour').value);
     state.minRating = Number($('#min-rating').value);
     state.minReviews = Number($('#min-reviews').value);
-    state.sort = $('#sort').value;
+    state[sortKey()] = $('#sort').value;
     state.openOnly = $('#open-only').checked;
     state.showCount = 10;
     savePrefs();
     renderList();
   };
-  ['#min-rating', '#min-reviews', '#sort', '#open-only'].forEach((s) => $(s).addEventListener('change', onFilter));
+  ['#detour', '#min-rating', '#min-reviews', '#sort', '#open-only'].forEach((s) => $(s).addEventListener('change', onFilter));
 
   $('#chips').addEventListener('click', (e) => {
     const btn = e.target.closest('.chip');

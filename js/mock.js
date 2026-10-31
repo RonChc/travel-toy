@@ -52,12 +52,39 @@ export async function searchText(key, query, center, radius) {
 
 export async function geocode(key, text) {
   await sleep(200);
-  return { lat: 25.0339, lng: 121.5645, label: text };
+  const h = [...text].reduce((s, c) => s + c.charCodeAt(0), 0);
+  return { lat: 25.0339 + (rand(h) - 0.5) * 0.2, lng: 121.5645 + (rand(h + 1) - 0.5) * 0.2, label: text };
+}
+
+const SPEED = { DRIVE: 7, WALK: 1.3 }; // m/s
+
+export async function computeRoute(key, a, b, mode) {
+  await sleep(200);
+  const meters = Math.round(dist(a, b) * 1.3);
+  return { seconds: Math.round(meters / SPEED[mode]), meters, polyline: JSON.stringify([a, b]) };
+}
+
+// 假資料沿 A→B 直線散佈
+export async function searchAlongRoute(key, query, polyline, origin, mode) {
+  const [a, b] = JSON.parse(polyline);
+  const places = await searchNearby(key, a, 0, []);
+  return places.map((p, i) => {
+    const t = rand(i + 21);
+    const loc = {
+      lat: a.lat + (b.lat - a.lat) * t + (rand(i + 31) - 0.5) * 0.02,
+      lng: a.lng + (b.lng - a.lng) * t + (rand(i + 41) - 0.5) * 0.02,
+    };
+    const leg = (x, y) => {
+      const meters = Math.round(dist(x, y) * 1.3);
+      return { seconds: Math.round(meters / SPEED[mode]), meters };
+    };
+    return { ...p, location: { latitude: loc.lat, longitude: loc.lng }, legs: [leg(a, loc), leg(loc, b)] };
+  });
 }
 
 export async function routeMatrix(key, origin, dests, mode) {
   await sleep(300);
-  const speed = mode === 'DRIVE' ? 7 : 1.3; // m/s
+  const speed = SPEED[mode];
   return dests.map((d, i) => {
     const meters = Math.round(dist(origin, d) * (1.25 + rand(i) * 0.3));
     return { seconds: Math.round(meters / speed + (mode === 'DRIVE' ? 120 : 0)), meters };

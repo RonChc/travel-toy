@@ -20,13 +20,33 @@
       <button id="open-settings" class="icon-btn" aria-label="設定">⚙️</button>
     </div>
 
-    <div class="origin">
-      <span id="origin-label">尚未設定位置</span>
-      <button id="locate" class="small-btn">重新定位</button>
+    <div class="view-tabs" role="tablist">
+      <button class="view-btn" data-view="nearby">📍 附近</button>
+      <button class="view-btn" data-view="route">🛣️ 順路</button>
     </div>
-    <form id="address-form" class="address-form">
-      <input id="address" type="search" placeholder="或輸入地址、地標…" enterkeyhint="search" autocomplete="off">
-      <button type="submit" class="small-btn">搜尋</button>
+
+    <div id="nearby-panel" class="panel">
+      <div class="origin">
+        <span id="origin-label">尚未設定位置</span>
+        <button id="locate" class="small-btn">重新定位</button>
+      </div>
+      <form id="address-form" class="address-form">
+        <input id="address" type="search" placeholder="或輸入地址、地標…" enterkeyhint="search" autocomplete="off">
+        <button type="submit" class="small-btn">搜尋</button>
+      </form>
+    </div>
+
+    <form id="route-form" class="panel route-panel" hidden>
+      <div class="route-rows">
+        <label class="route-row"><span class="pin">A</span>
+          <input id="route-a" type="search" placeholder="起點（空白 = 目前位置）" autocomplete="off" enterkeyhint="next">
+        </label>
+        <label class="route-row"><span class="pin pin-b">B</span>
+          <input id="route-b" type="search" placeholder="終點地址或地標" autocomplete="off" enterkeyhint="go">
+        </label>
+      </div>
+      <button type="submit" hidden></button>
+      <p id="route-summary" class="route-summary"></p>
     </form>
 
     <div class="mode" role="group" aria-label="交通方式">
@@ -36,10 +56,24 @@
   </header>
 
   <main>
+    <form id="kw-form" class="kw-form">
+      <input id="kw" type="search" placeholder="🔍 搜尋關鍵字，例如：牛肉湯" enterkeyhint="search" autocomplete="off">
+      <button type="submit" class="small-btn">找</button>
+    </form>
+
     <nav id="categories" class="categories"></nav>
 
     <section class="filters">
-      <label>範圍
+      <label id="detour-wrap" hidden>繞路上限
+        <select id="detour">
+          <option value="300">5 分鐘內</option>
+          <option value="600">10 分鐘內</option>
+          <option value="900">15 分鐘內</option>
+          <option value="1200">20 分鐘內</option>
+          <option value="1800">30 分鐘內</option>
+        </select>
+      </label>
+      <label id="radius-wrap">範圍
         <select id="radius">
           <option value="500">500 公尺</option>
           <option value="1000">1 公里</option>
@@ -68,12 +102,7 @@
         </select>
       </label>
       <label>排序
-        <select id="sort">
-          <option value="distance">由近到遠</option>
-          <option value="fastest">最快抵達</option>
-          <option value="rating">評分高到低</option>
-          <option value="reviews">評論數多到少</option>
-        </select>
+        <select id="sort"></select>
       </label>
       <label class="check"><input id="open-only" type="checkbox"> 只看營業中</label>
     </section>
