@@ -43,6 +43,7 @@ export function partyText(party) {
   if (party.babies?.length) {
     parts.push(`幼兒 ${party.babies.length} 位（${party.babies.map((a) => (a === 0 ? '未滿 1 歲' : `${a} 歲`)).join('、')}）`);
   }
+  if (party.veg) parts.push('有人吃素');
   let text = parts.join('、') || '未填寫';
   if (party.note?.trim()) text += `。備註：${party.note.trim()}`;
   return text;

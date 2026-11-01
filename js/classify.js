@@ -100,3 +100,14 @@ export function placeLabel(place) {
   }
   return '其他';
 }
+
+// 蔬食：2 = 素食店、1 = 有素食可吃、0 = 看不出來
+const VEG_NAME = /素食|蔬食|素齋|齋菜|全素|蛋奶素|vegan|vegetarian/i;
+const VEG_REVIEW = /(有|提供|可以?|能)[^，。！？\s]{0,3}(素食|蔬食|素的|素料理)|素食者|吃素的(朋友|人)/;
+export function vegLevel(place) {
+  const name = place.displayName?.text || '';
+  if (VEG_NAME.test(name) || /vegan|vegetarian/.test(place.primaryType || '')) return 2;
+  if (place.servesVegetarianFood) return 1;
+  if ((place.reviews || []).some((r) => VEG_REVIEW.test(r.text?.text || r.originalText?.text || ''))) return 1;
+  return 0;
+}

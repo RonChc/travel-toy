@@ -7,7 +7,7 @@ const ROUTE_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 const PLACE_FIELDS = [
   'id', 'displayName', 'location', 'rating', 'userRatingCount', 'primaryType',
   'primaryTypeDisplayName', 'types', 'priceLevel', 'currentOpeningHours.openNow', 'regularOpeningHours.periods',
-  'googleMapsUri', 'shortFormattedAddress', 'editorialSummary', 'reviews',
+  'googleMapsUri', 'shortFormattedAddress', 'editorialSummary', 'reviews', 'servesVegetarianFood',
 ].map((f) => `places.${f}`).join(',');
 
 async function post(url, body, fieldMask, key) {

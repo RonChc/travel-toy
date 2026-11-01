@@ -1,5 +1,5 @@
 import { CATEGORIES } from './categories.js';
-import { cuisineLabel, shopKind, placeLabel } from './classify.js';
+import { cuisineLabel, shopKind, placeLabel, vegLevel } from './classify.js';
 import { isOpenAt, hoursOn, fmtClock } from './hours.js';
 import * as realApi from './api.js';
 import * as mockApi from './mock.js';
@@ -45,7 +45,7 @@ function savePrefs() {
 const state = {
   key: '', claudeKey: '', view: 'nearby', mode: 'DRIVE', radius: 3000, maxDetour: 600,
   minRating: 0, minReviews: 0, openOnly: false, sortNearby: 'distance', sortRoute: 'detour',
-  party: { adults: 2, seniors: 0, kids: [], babies: [], note: '' },
+  party: { adults: 2, seniors: 0, kids: [], babies: [], note: '', veg: false },
   ...loadPrefs(),
   aiPicks: new Map(), // AI 推薦：id → 理由
   highlights: loadHighlights(),
@@ -262,6 +262,10 @@ async function settle(jobs) {
   return [...byId.values()];
 }
 
+// 有人吃素時，吃的類別多搜一次「素食」，候選才不會都沒有蔬食
+const vegFirst = () => !!state.party.veg;
+const vegQueries = (q) => (vegFirst() && q.cat?.food ? ['素食'] : []);
+
 function fetchNearby(q, origin, radius) {
   if (q.text) return settle([api.searchText(state.key, q.text, origin, radius)]);
   const cat = q.cat;
@@ -272,12 +276,14 @@ function fetchNearby(q, origin, radius) {
       return api.searchNearby(state.key, origin, radius, cat.fallbackTypes);
     }));
   }
-  for (const t of cat.queries || []) jobs.push(api.searchText(state.key, t, origin, radius, serverOpenNow(q)));
+  for (const t of [...(cat.queries || []), ...vegQueries(q)]) {
+    jobs.push(api.searchText(state.key, t, origin, radius, serverOpenNow(q)));
+  }
   return settle(jobs);
 }
 
 function fetchAlong(q, route) {
-  const texts = q.text ? [q.text] : (q.cat.queries || q.cat.alongQueries || [q.cat.name]);
+  const texts = q.text ? [q.text] : [...(q.cat.queries || q.cat.alongQueries || [q.cat.name]), ...vegQueries(q)];
   return settle(texts.map((t) => api.searchAlongRoute(state.key, t, route.polyline, route.a, state.mode)));
 }
 
@@ -314,8 +320,8 @@ async function runSearch() {
 
 function annotateFood(q, places) {
   state.food = q.cat ? !!q.cat.food : places.filter(isFoodPlace).length > places.length / 2;
-  if (!state.food) return places.map((p) => ({ ...p, cuisine: placeLabel(p) }));
-  return places.map((p) => ({ ...p, cuisine: cuisineLabel(p), kind: shopKind(p) }));
+  if (!state.food) return places.map((p) => ({ ...p, cuisine: placeLabel(p), veg: vegLevel(p) }));
+  return places.map((p) => ({ ...p, cuisine: cuisineLabel(p), kind: shopKind(p), veg: vegLevel(p) }));
 }
 
 async function searchNearbyPlaces(id, q) {
@@ -330,7 +336,8 @@ async function searchNearbyPlaces(id, q) {
       return { ...p, loc, straight: haversine(origin, loc) };
     })
     .filter((p) => p.straight <= state.radius)
-    .sort((a, b) => a.straight - b.straight)
+    // 有人吃素：取候選時先保留有蔬食的
+    .sort((a, b) => (vegFirst() ? (vegLevel(b) > 0) - (vegLevel(a) > 0) : 0) || a.straight - b.straight)
     .slice(0, MAX_CANDIDATES);
   state.places = annotateFood(q, places);
   renderList();
@@ -407,7 +414,10 @@ function visiblePlaces() {
     detour: (a, b) => (a.detour ?? Infinity) - (b.detour ?? Infinity) || byRating(a, b),
     order: (a, b) => (a.toPlace?.seconds ?? Infinity) - (b.toPlace?.seconds ?? Infinity),
   };
-  return list.sort(sorters[state[sortKey()]] || sorters.rating);
+  list.sort(sorters[state[sortKey()]] || sorters.rating);
+  // 有人吃素：吃的類別依 素食店 → 有蔬食 → 其他 排（同組內維持原本排序）
+  if (vegFirst() && state.food) list.sort((a, b) => (b.veg || 0) - (a.veg || 0));
+  return list;
 }
 
 function travelLine(p) {
@@ -439,6 +449,8 @@ function card(p) {
   } else if (p.primaryTypeDisplayName?.text) {
     tags.push(`<span class="tag tag-cuisine">${esc(p.primaryTypeDisplayName.text)}</span>`);
   }
+  if (p.veg === 2) tags.push('<span class="tag tag-veg">🥬 素食店</span>');
+  else if (p.veg === 1) tags.push('<span class="tag tag-veg">🥬 有蔬食</span>');
   tags.push(openTag(p));
 
   const rating = p.rating
@@ -497,6 +509,7 @@ function renderChips() {
     return;
   }
   bar.innerHTML = [
+    state.food ? `<button class="chip chip-veg${vegFirst() ? ' active' : ''}" data-group="veg">🥬 蔬食優先</button>` : '',
     chip('all', null, '全部', base.length),
     ...(state.food ? [...['小吃店', '餐廳'].map((k) => chip('kind', k, k, kinds.get(k) || 0)), '<span class="chip-sep"></span>'] : []),
     ...cuisines.map(([c, n]) => chip('cuisine', c, c, n)),
@@ -645,6 +658,7 @@ function renderPartyForm() {
     list.innerHTML = partyDraft[group].map((age, i) => ageItem(group, age, i)).join('');
   }
   $('#party-note').value = partyDraft.note;
+  $('#party-veg').checked = !!partyDraft.veg;
 }
 
 function openParty() {
@@ -654,7 +668,17 @@ function openParty() {
 }
 
 function syncPartyButton() {
-  $('#party-summary').textContent = partyShort(state.party);
+  $('#party-summary').textContent = partyShort(state.party) + (state.party.veg ? ' 🥬' : '');
+}
+
+// 切換「有人吃素」：吃的類別要重搜，才會多找素食店
+function setVeg(on) {
+  if (vegFirst() === on) return;
+  state.party = { ...state.party, veg: on };
+  savePrefs();
+  syncPartyButton();
+  if (on && state.query?.cat?.food) runSearch();
+  else renderList();
 }
 
 // ---------- AI 幫我挑 ----------
@@ -666,6 +690,7 @@ function placeForAi(p) {
     名稱: p.displayName?.text,
     評分: p.rating ?? null,
     評論數: p.userRatingCount ?? 0,
+    ...(p.veg ? { 蔬食: p.veg === 2 ? '素食店' : '有蔬食' } : {}),
     類型: p.kind ? `${p.cuisine}／${p.kind}` : p.cuisine || p.primaryTypeDisplayName?.text,
     營業: { true: '抵達時有營業', false: '抵達時沒營業', undefined: '不明' }[openStatus(p)],
     ...(state.view === 'route'
@@ -930,6 +955,10 @@ function bind() {
     const btn = e.target.closest('.chip');
     if (!btn) return;
     const { group, val } = btn.dataset;
+    if (group === 'veg') {
+      setVeg(!vegFirst());
+      return;
+    }
     if (group === 'all') {
       state.cuisine = null;
       state.kind = null;
@@ -990,9 +1019,11 @@ function bind() {
   $('#party-form').addEventListener('submit', (e) => {
     if (e.submitter?.value !== 'save') return;
     partyDraft.note = $('#party-note').value.trim();
-    state.party = partyDraft;
+    const veg = $('#party-veg').checked;
+    state.party = { ...partyDraft, veg: vegFirst() };
     savePrefs();
     syncPartyButton();
+    setVeg(veg);
     toast(`同行成員已更新：${ai.partyText(state.party)}`);
   });
 }

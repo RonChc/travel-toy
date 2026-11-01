@@ -303,3 +303,7 @@ dialog form > input { width: 100%; margin-top: 4px; }
 
 .hl { font-size: 13px; color: var(--text); }
 .hl-wait { color: var(--muted); }
+.tag-veg { background: #e7f6e9; color: #15803d; font-weight: 600; }
+.chip-veg.active { background: #15803d; border-color: #15803d; }
+dialog form > label.veg-row { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.veg-row input { width: 18px; height: 18px; accent-color: #15803d; margin: 0; }

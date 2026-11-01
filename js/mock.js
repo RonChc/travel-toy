@@ -13,6 +13,7 @@ const SAMPLES = [
   ['港記茶餐廳', 'restaurant', '餐廳', null],
   ['好味便當', 'meal_takeaway', '外賣餐廳', 'PRICE_LEVEL_INEXPENSIVE'],
   ['川味小館', 'chinese_restaurant', '中式餐廳', 'PRICE_LEVEL_MODERATE'],
+  ['青蔬食堂', 'vegetarian_restaurant', '素食餐廳', 'PRICE_LEVEL_INEXPENSIVE'],
   ['日光咖啡', 'cafe', '咖啡廳', null],
   ['麻古茶坊', 'tea_house', '茶藝館', null],
   ['小甜甜蛋糕', 'dessert_shop', '甜點店', null],
@@ -62,6 +63,7 @@ export async function searchNearby(key, center, radius, types) {
     googleMapsUri: 'https://maps.google.com/',
     shortFormattedAddress: `測試路 ${i + 1} 號`,
     reviews: [{ text: { text: '很好吃，推薦招牌！' } }],
+    servesVegetarianFood: i % 5 === 1 || undefined,
   }));
 }
 
