@@ -61,6 +61,7 @@ export async function searchNearby(key, center, radius, types) {
     ...mockHours(i),
     googleMapsUri: 'https://maps.google.com/',
     shortFormattedAddress: `測試路 ${i + 1} 號`,
+    reviews: [{ text: { text: '很好吃，推薦招牌！' } }],
   }));
 }
 
@@ -125,6 +126,10 @@ export const ai = {
       picks: places.slice(0, 3).map((p) => ({ id: p.id, reason: `評分 ${p.評分}，適合全家` })),
       tips: '假日中午人多，建議提早出發。',
     };
+  },
+  async highlights({ places }) {
+    await sleep(400);
+    return places.map((p, i) => ({ id: p.id, text: i % 4 === 3 ? '' : `（測試）${p.名稱}招牌、人氣品項` }));
   },
   async planTrip({ searchPlaces, onTurn, onText, onStatus }) {
     onTurn();

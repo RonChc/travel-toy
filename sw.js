@@ -1,5 +1,5 @@
 ﻿// 只快取 App 外殼；Google API 一律走網路
-const CACHE = 'travel-toy-v4';
+const CACHE = 'travel-toy-v5';
 const SHELL = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest', 'icons/icon.svg',
   'js/app.js', 'js/api.js', 'js/categories.js', 'js/classify.js', 'js/hours.js', 'js/ai.js', 'js/mock.js',

@@ -99,6 +99,53 @@ async function recommendRaw({ apiKey, party, context, places }) {
   return JSON.parse(text);
 }
 
+// ---------- 從評論整理每間店的招牌／特色（便宜快速的 Haiku） ----------
+const HIGHLIGHT_MODEL = 'claude-haiku-5-5';
+const HIGHLIGHTS_SCHEMA = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          text: { type: 'string', description: '20 字內；看不出來就給空字串' },
+        },
+        required: ['id', 'text'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['items'],
+  additionalProperties: false,
+};
+
+const HIGHLIGHT_SYSTEM = `你幫忙從 Google 評論整理每個地點的重點，讓人不用點進去看。
+- 吃的、喝的：列出評論最常推薦的品項，最多 3 個，用「、」分隔，例如「西螺麻糬、花生湯圓、杏仁茶」。
+- 其他地點（公園、親子館、停車場等）：一句話講最大特色，例如「有沙坑和大型溜滑梯，樹蔭多」。
+- 20 字內，繁體中文，不要加「招牌：」之類的開頭。
+- 只根據提供的評論和簡介，看不出來就給空字串，不要編造。`;
+
+export function highlights(args) {
+  return withFriendlyErrors(() => highlightsRaw(args));
+}
+
+async function highlightsRaw({ apiKey, places }) {
+  const client = await getClient(apiKey);
+  const msg = await client.messages.create({
+    model: HIGHLIGHT_MODEL,
+    max_tokens: 8000,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: HIGHLIGHTS_SCHEMA } },
+    system: HIGHLIGHT_SYSTEM,
+    messages: [{ role: 'user', content: `地點（JSON）：\n${JSON.stringify(places)}` }],
+  });
+  checkStop(msg);
+  const text = msg.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new Error('AI 沒有回覆內容');
+  return JSON.parse(text).items;
+}
+
 // ---------- 規劃行程（Claude 自己呼叫搜尋工具找真實店家） ----------
 const SEARCH_TOOL = {
   name: 'search_places',

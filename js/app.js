@@ -23,6 +23,20 @@ const PREF_FIELDS = ['key', 'claudeKey', 'party', 'view', 'mode', 'radius', 'max
 function loadPrefs() {
   try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; }
 }
+// AI 整理的招牌／特色：id → { text, t }，存手機 30 天，同一間不重複花錢
+const HL_KEY = 'travel-toy-highlights';
+const HL_DAYS = 30;
+function loadHighlights() {
+  try {
+    const all = JSON.parse(localStorage.getItem(HL_KEY)) || {};
+    const fresh = Object.entries(all).filter(([, v]) => Date.now() - v.t < HL_DAYS * 864e5);
+    return new Map(fresh.slice(-500));
+  } catch { return new Map(); }
+}
+function saveHighlights() {
+  try { localStorage.setItem(HL_KEY, JSON.stringify(Object.fromEntries(state.highlights))); } catch { /* 存不了就略過 */ }
+}
+
 function savePrefs() {
   const out = Object.fromEntries(PREF_FIELDS.map((k) => [k, state[k]]));
   try { localStorage.setItem(PREF_KEY, JSON.stringify(out)); } catch { /* 無痕模式等情況存不了，略過 */ }
@@ -34,6 +48,9 @@ const state = {
   party: { adults: 2, seniors: 0, kids: [], babies: [], note: '' },
   ...loadPrefs(),
   aiPicks: new Map(), // AI 推薦：id → 理由
+  highlights: loadHighlights(),
+  hlPending: new Set(), // 正在請 AI 整理的 id
+  hlFailed: new Set(), // 這次開 App 整理失敗的 id，不再重試
   here: null, // GPS 目前位置
   origin: null, // 附近模式的中心點
   route: null, // 順路模式：{ a, b, seconds, meters, polyline, mode }
@@ -429,12 +446,17 @@ function card(p) {
     : '<span class="count">尚無評分</span>';
 
   const reason = state.aiPicks.get(p.id);
+  const hl = state.highlights.get(p.id)?.text || p.editorialSummary?.text;
+  const hlLine = hl
+    ? `<div class="hl">👍 ${esc(hl)}</div>`
+    : (state.hlPending.has(p.id) && !state.highlights.has(p.id) ? '<div class="hl hl-wait">整理招牌中…</div>' : '');
 
   return `<li class="card${reason ? ' picked' : ''}">
     <div class="card-main">
       <a class="name" href="${esc(p.googleMapsUri)}" target="_blank" rel="noopener">${esc(p.displayName?.text)}</a>
       <div class="meta">${rating}</div>
       <div class="tags">${tags.join('')}</div>
+      ${hlLine}
       <div class="travel">${travelLine(p)}</div>
       ${reason ? `<div class="ai-reason">AI：${esc(reason)}</div>` : ''}
       <div class="addr">${esc(p.shortFormattedAddress)}</div>
@@ -495,7 +517,11 @@ function renderList() {
   }
   const all = visiblePlaces();
   const shown = all.slice(0, state.showCount);
+  const need = state.claudeKey || MOCK ? shown.filter((p) => p.reviews?.length
+    && !state.highlights.has(p.id) && !state.hlPending.has(p.id) && !state.hlFailed.has(p.id)) : [];
+  need.forEach((p) => state.hlPending.add(p.id));
   list.innerHTML = shown.map(card).join('');
+  if (need.length) fillHighlights(need);
   more.hidden = all.length <= state.showCount;
   $('#ai-pick').hidden = !all.length;
   if (state.places.length && !all.length) {
@@ -686,6 +712,32 @@ async function aiPick() {
     btn.disabled = false;
     btn.textContent = 'AI 幫我挑';
   }
+}
+
+// 顯示中的店，有評論但還沒整理過的，一次送給 AI 整理招牌／特色
+async function fillHighlights(places) {
+  try {
+    const items = await ai.highlights({
+      apiKey: state.claudeKey,
+      places: places.map((p) => ({
+        id: p.id,
+        名稱: p.displayName?.text,
+        類型: p.primaryTypeDisplayName?.text,
+        簡介: p.editorialSummary?.text,
+        評論: p.reviews.map((r) => (r.text?.text || r.originalText?.text || '').slice(0, 300)).filter(Boolean),
+      })),
+    });
+    const ids = new Set(places.map((p) => p.id));
+    for (const x of items) if (ids.has(x.id)) state.highlights.set(x.id, { text: x.text.trim(), t: Date.now() });
+    // 沒回到的也記成空的，避免一直重送
+    for (const id of ids) if (!state.highlights.has(id)) state.highlights.set(id, { text: '', t: Date.now() });
+    if (!MOCK) saveHighlights();
+  } catch (err) {
+    places.forEach((p) => state.hlFailed.add(p.id));
+    toast(`AI 整理招牌失敗：${err.message}`);
+  }
+  places.forEach((p) => state.hlPending.delete(p.id));
+  renderList();
 }
 
 // ---------- AI 行程 ----------
