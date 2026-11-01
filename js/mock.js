@@ -14,6 +14,8 @@ const SAMPLES = [
   ['好味便當', 'meal_takeaway', '外賣餐廳', 'PRICE_LEVEL_INEXPENSIVE'],
   ['川味小館', 'chinese_restaurant', '中式餐廳', 'PRICE_LEVEL_MODERATE'],
   ['日光咖啡', 'cafe', '咖啡廳', null],
+  ['麻古茶坊', 'tea_house', '茶藝館', null],
+  ['小甜甜蛋糕', 'dessert_shop', '甜點店', null],
   ['河濱公園', 'park', '公園', null],
   ['小樹親子館', 'indoor_playground', '室內遊樂場', null],
   ['市府停車場', 'parking', '停車場', null],

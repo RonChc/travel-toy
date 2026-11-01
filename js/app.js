@@ -1,5 +1,5 @@
 import { CATEGORIES } from './categories.js';
-import { cuisineLabel, shopKind } from './classify.js';
+import { cuisineLabel, shopKind, placeLabel } from './classify.js';
 import { isOpenAt, hoursOn, fmtClock } from './hours.js';
 import * as realApi from './api.js';
 import * as mockApi from './mock.js';
@@ -297,7 +297,7 @@ async function runSearch() {
 
 function annotateFood(q, places) {
   state.food = q.cat ? !!q.cat.food : places.filter(isFoodPlace).length > places.length / 2;
-  if (!state.food) return places;
+  if (!state.food) return places.map((p) => ({ ...p, cuisine: placeLabel(p) }));
   return places.map((p) => ({ ...p, cuisine: cuisineLabel(p), kind: shopKind(p) }));
 }
 
@@ -418,7 +418,7 @@ function card(p) {
   const tags = [];
   if (p.cuisine) {
     tags.push(`<span class="tag tag-cuisine">${esc(p.cuisine)}</span>`);
-    tags.push(`<span class="tag ${p.kind === '小吃店' ? 'tag-snack' : 'tag-rest'}">${p.kind}</span>`);
+    if (p.kind) tags.push(`<span class="tag ${p.kind === '小吃店' ? 'tag-snack' : 'tag-rest'}">${p.kind}</span>`);
   } else if (p.primaryTypeDisplayName?.text) {
     tags.push(`<span class="tag tag-cuisine">${esc(p.primaryTypeDisplayName.text)}</span>`);
   }
@@ -443,10 +443,10 @@ function card(p) {
   </li>`;
 }
 
-// 吃的類別：依目前結果產生「餐廳／小吃店」與料理類型的篩選按鈕
+// 依目前結果產生類型篩選按鈕；吃的類別另有「餐廳／小吃店」
 function renderChips() {
   const bar = $('#chips');
-  if (!state.food || !state.places.length) {
+  if (!state.places.length) {
     bar.hidden = true;
     return;
   }
@@ -469,10 +469,14 @@ function renderChips() {
     if (!n && !active && val !== null) return '';
     return `<button class="chip${active ? ' active' : ''}" data-group="${group}" data-val="${esc(val ?? '')}">${esc(label)} <b>${n}</b></button>`;
   };
+  // 非吃的類別只有一種類型時，按鈕沒意義
+  if (!state.food && cuisines.length < 2 && !state.cuisine) {
+    bar.hidden = true;
+    return;
+  }
   bar.innerHTML = [
     chip('all', null, '全部', base.length),
-    ...['小吃店', '餐廳'].map((k) => chip('kind', k, k, kinds.get(k) || 0)),
-    '<span class="chip-sep"></span>',
+    ...(state.food ? [...['小吃店', '餐廳'].map((k) => chip('kind', k, k, kinds.get(k) || 0)), '<span class="chip-sep"></span>'] : []),
     ...cuisines.map(([c, n]) => chip('cuisine', c, c, n)),
   ].join('');
   bar.hidden = false;
@@ -636,7 +640,7 @@ function placeForAi(p) {
     名稱: p.displayName?.text,
     評分: p.rating ?? null,
     評論數: p.userRatingCount ?? 0,
-    類型: p.cuisine ? `${p.cuisine}／${p.kind}` : p.primaryTypeDisplayName?.text,
+    類型: p.kind ? `${p.cuisine}／${p.kind}` : p.cuisine || p.primaryTypeDisplayName?.text,
     營業: { true: '抵達時有營業', false: '抵達時沒營業', undefined: '不明' }[openStatus(p)],
     ...(state.view === 'route'
       ? { 繞路分鐘: p.detour === null ? null : Math.round(p.detour / 60) }

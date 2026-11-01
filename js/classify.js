@@ -55,3 +55,48 @@ export function shopKind(place) {
   ) return '小吃店';
   return '餐廳';
 }
+
+// 非吃的類別：店名關鍵字 → Google 類型 → Google 顯示名稱，給「類型按鈕列」分組用
+const PLACE_NAME_RULES = [
+  [/手搖|茶飲|飲料|奶茶|珍奶|50嵐|清心|可不可|迷客夏|coco|大苑子|麻古|金點子|再睡5分鐘|茶湯會|五桐號|得正|鮮茶道|龜記/i, '手搖飲'],
+  [/甜點|蛋糕|甜品|豆花|剉冰|冰店|雪花冰|鬆餅|布丁|可麗露|cake|dessert/i, '甜點'],
+  [/麵包|烘焙|bakery/i, '麵包店'],
+  [/咖啡|coffee|caf[eé]|珈琲|星巴克|路易莎|cama/i, '咖啡廳'],
+  [/親子館|育兒|兒童館/, '親子館'],
+  [/親子餐廳/, '親子餐廳'],
+  [/遊樂|樂園|球池|淘氣堡|兒童室內/, '室內遊樂場'],
+  [/博物館|美術館|科學館|展覽|文化館|紀念館/, '展館'],
+  [/圖書館|書店|繪本/, '圖書/書店'],
+  [/百貨|購物中心|商場|outlet/i, '百貨商場'],
+  [/農場|牧場|休閒園區/, '農場'],
+  [/遊戲場|特色公園|共融/, '兒童遊戲場'],
+  [/河濱|濕地|海邊|海灘|沙灘|海岸|漁港/, '河濱/海邊'],
+  [/步道|登山|森林/, '步道'],
+  [/觀景|景觀|夜景|眺望/, '景觀'],
+  [/路邊|路外/, '路邊停車'],
+  [/立體停車|停車大樓/, '立體停車場'],
+  [/加油站/, '加油站'],
+  [/7-11|7-eleven|統一超商|全家|萊爾富|ok超商|ok mart/i, '便利商店'],
+];
+
+const TYPE_LABELS = {
+  cafe: '咖啡廳', coffee_shop: '咖啡廳', dessert_shop: '甜點', bakery: '麵包店', tea_house: '茶館',
+  ice_cream_shop: '甜點', confectionery: '甜點', juice_shop: '手搖飲',
+  playground: '兒童遊戲場', park: '公園', city_park: '公園', national_park: '公園',
+  indoor_playground: '室內遊樂場', amusement_center: '室內遊樂場', amusement_park: '遊樂園',
+  museum: '展館', art_gallery: '展館', library: '圖書/書店', book_store: '圖書/書店',
+  shopping_mall: '百貨商場', department_store: '百貨商場', zoo: '動物園', aquarium: '水族館',
+  farm: '農場', hiking_area: '步道', observation_deck: '景觀', scenic_spot: '景觀', beach: '河濱/海邊',
+  parking: '停車場', parking_lot: '停車場', parking_garage: '立體停車場',
+  public_bathroom: '公廁', gas_station: '加油站', convenience_store: '便利商店',
+};
+
+export function placeLabel(place) {
+  const name = place.displayName?.text || '';
+  for (const [re, label] of PLACE_NAME_RULES) if (re.test(name)) return label;
+  if (TYPE_LABELS[place.primaryType]) return TYPE_LABELS[place.primaryType];
+  if (place.primaryType && !GENERIC_TYPES.has(place.primaryType) && place.primaryTypeDisplayName?.text) {
+    return place.primaryTypeDisplayName.text;
+  }
+  return '其他';
+}
