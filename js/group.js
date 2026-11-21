@@ -708,7 +708,7 @@ function render() {
     if (on) { $('#group-name').textContent = me.groupName; $('#group-meta').textContent = '載入中…'; }
     return;
   }
-  const key = JSON.stringify([state.members, state.group, state.me, state.pushEnabled, Math.floor(Date.now() / 60000), ENV.getHere()?.lat]);
+  const key = JSON.stringify([state.members, state.group, state.me, state.pushEnabled, state.asks, Math.floor(Date.now() / 60000), ENV.getHere()?.lat]);
   if (key === lastKey) return;
   lastKey = key;
   $('#group-name').textContent = `${state.group.name}`;
@@ -719,6 +719,13 @@ function render() {
   clear(list);
   state.members.forEach((m) => list.append(memberRow(m)));
   $('#group-find-all').hidden = state.members.length < 2;
+  // 按了「等一下」的找人請求，留在這裡可以隨時回覆
+  const pend = $('#group-pending');
+  clear(pend);
+  state.asks.forEach((a) => pend.append(h('div', { class: 'pending-item' },
+    h('span', null, `⏳ ${a.from?.emoji || ''} ${a.from?.name || '有人'} 在問你在哪裡`),
+    h('button', { type: 'button', class: 'primary-btn', onclick: () => openAsk(a) }, '回覆'))));
+  pend.hidden = !state.asks.length;
   renderInvite();
   renderPushLine();
 }

@@ -371,3 +371,6 @@ dialog form > select { width: 100%; margin-top: 4px; }
 dialog { max-height: calc(100dvh - 32px); overflow-y: auto; }
 .group-actions .ghost-btn, .group-invite .ghost-btn { background: var(--surface); border: 1px solid var(--line); }
 .group-invite .group-actions { width: 100%; }
+.pending { display: grid; gap: 6px; }
+.pending-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--snack-soft); color: var(--snack); border-radius: var(--radius); padding: 8px 12px; font-weight: 600; }
+.pending-item .primary-btn { padding: 6px 14px; }
