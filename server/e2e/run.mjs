@@ -53,6 +53,7 @@ await sleep(800);
 const browser = await chromium.launch({ executablePath: findChrome(), headless: true, args: ['--use-fake-ui-for-media-stream'] });
 
 const consoleErrors = { A: [], B: [] };
+const siteRequests = []; // B 送給靜態網站（GitHub Pages 角色）的所有請求網址
 const responses = { B: [] }; // B 收到的所有後台回應內容（驗證沒有金鑰）
 
 async function newUser(label, geo) {
@@ -64,6 +65,7 @@ async function newUser(label, geo) {
   page.on('console', (m) => { if (m.type() === 'error') consoleErrors[label].push(m.text()); });
   page.on('pageerror', (e) => consoleErrors[label].push(`pageerror: ${e.message}`));
   if (label === 'B') {
+    page.on('request', (r) => { if (r.url().startsWith(WEB)) siteRequests.push(r.url()); });
     page.on('response', async (r) => {
       if (r.url().startsWith(backend.base)) responses.B.push({ url: r.url(), status: r.status(), text: await r.text().catch(() => '') });
     });
@@ -138,7 +140,7 @@ try {
     await A.page.waitForSelector('#group-on:not([hidden])');
     await A.page.waitForSelector('#group-invite input');
     inviteLink = await A.page.inputValue('#group-invite input');
-    check(inviteLink.includes('join=') && inviteLink.includes('server='), '邀請連結要帶邀請碼與伺服器網址');
+    check(inviteLink.includes('#join=') && inviteLink.includes('server=') && !inviteLink.includes('?'), '邀請連結要帶邀請碼與伺服器網址，且放在 # 後面');
     check(await A.page.locator('#group-invite img.qr').count() === 1, '要顯示 QR');
     await shot(A, '01-A建立群組-邀請QR');
     return inviteLink.replace(/join=[^&]+/, 'join=***');
@@ -164,6 +166,7 @@ try {
     const names = await B.page.locator('#group-members .m-name').allTextContents();
     check(names.some((t) => t.includes('老闆')) && names.some((t) => t.includes('小明')), names.join('|'));
     check(!B.page.url().includes('join='), 'join 參數應清掉（避免邀請碼留在網址列）');
+    check(!siteRequests.some((u) => u.includes('join=')), `邀請碼不應出現在送給網站主機的請求網址：${siteRequests.filter((u) => u.includes('join=')).join(',')}`);
   });
 
   // ===== 3. B 開啟通知（訂閱）=====

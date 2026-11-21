@@ -183,7 +183,7 @@ async function openJoin({ code, server }) {
     const info = await callJson('POST', '/api/invite/info', { auth: false, server: norm, body: { inviteCode: code } });
     pendingJoin = { code, server: norm };
     $('#gj-title').textContent = `加入「${info.groupName}」`;
-    $('#gj-server').textContent = `伺服器：${new URL(norm).host}（目前 ${info.memberCount} 人）`;
+    $('#gj-server').textContent = `伺服器：${new URL(norm).host}（目前 ${info.memberCount} 人）。只加入認識的人傳來的連結。`;
     emojiPicker($('#gj-emoji'), EMOJIS[Math.floor(Math.random() * EMOJIS.length)]);
     $('#gj-error').textContent = '';
     $('#group-join-dialog').showModal();
@@ -226,8 +226,9 @@ function afterJoin(msg) {
 function parseInvite(text) {
   try {
     const u = new URL(text.trim());
-    const code = u.searchParams.get('join');
-    if (code) return { code, server: u.searchParams.get('server') || '' };
+    const p = new URLSearchParams(u.hash.replace(/^#/, ''));
+    const code = p.get('join');
+    if (code) return { code, server: p.get('server') || '' };
   } catch { /* 不是網址 */ }
   return null;
 }
@@ -558,7 +559,8 @@ function renderInvite() {
 
 function inviteLink() {
   const base = `${location.origin}${location.pathname}`;
-  return `${base}?join=${encodeURIComponent(me.inviteCode)}&server=${encodeURIComponent(me.server)}`;
+  // 放在 # 後面：瀏覽器不會把它送給網站主機（GitHub），邀請碼不會留在任何伺服器紀錄裡
+  return `${base}#join=${encodeURIComponent(me.inviteCode)}&server=${encodeURIComponent(me.server)}`;
 }
 
 async function shareInvite() {
@@ -801,12 +803,15 @@ export function initGroup(env) {
 
   // 邀請連結／通知網址參數
   const q = new URLSearchParams(location.search);
-  const join = q.get('join');
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const join = hash.get('join');
   const find = q.get('find');
+  const server = hash.get('server');
   if (join || find) {
+    // 把邀請碼從網址列拿掉（也避免重新整理後又跳出加入視窗）
     history.replaceState(null, '', location.pathname + (q.has('mock') ? '?mock' : ''));
   }
-  return { join, server: q.get('server'), find, kind: q.get('kind') };
+  return { join, server, find, kind: q.get('kind') };
 }
 
 export { openJoin };

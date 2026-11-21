@@ -31,6 +31,8 @@
 - 版面：只用淺色（使用者不要黑底），篩選改成一排小膠囊選單；三個分頁是綠底分段按鈕
 - 「餐廳／小吃店」是推估（價位＋分類＋店名關鍵字），非 Google 官方
 
+- 群組找人（`feature/group-find`，未合併）：`👥 群組` 分頁＋自架後台 `server/`；家人走後台代轉用老闆金鑰、朋友要自己輸入；找人推播→回覆位置＋樓層＋照片；7 天自動刪除。設計與 API 見 [docs/group-find.md](docs/group-find.md)，啟動與通道步驟見 [server/README.md](server/README.md)
+
 ## 技術架構
 - 純前端靜態網頁（HTML + 原生 JS ES modules，無 build），PWA（manifest + sw.js）
 - 資料：Google Places API (New)（searchNearby / searchText）、Routes API（computeRouteMatrix），瀏覽器直接 fetch（已確認 CORS 可用）
@@ -54,6 +56,7 @@ http://localhost:5173/?mock   # 測試模式：假資料，不需金鑰
 - 重要變更用 git commit 留紀錄。
 
 ## 目前進度
+- 2026-11-21 HME-42 群組找人第一版完成（分支 `feature/group-find`，未推 master、未對外開放）：後台單元測試 39 項＋兩個瀏覽器端對端 19 項全過；待老闆決定：部署到哪台電腦、Google 金鑰用哪種、真機實測推播
 - 2026-11-08 版面調整：分頁改醒目分段按鈕（含圖示）、類別按鈕加大、修 AI 行程時間欄超出畫面
 - 2026-11-01 加入蔬食優先與蔬食標籤（測試模式跑過）
 - 2026-11-01 卡片加上招牌／特色（AI 讀 Google 評論整理，測試模式跑過）
@@ -69,6 +72,7 @@ http://localhost:5173/?mock   # 測試模式：假資料，不需金鑰
 - 2026-10-31 完成第一版：全部類別、定位／地址、開車走路切換、篩選排序、料理類型標籤、PWA；測試模式下跑過無錯誤
 
 ## 下一步
+- 群組找人：老闆驗收分支 → 決定後台電腦與對外網址（Tailscale Funnel／Cloudflare，要先問）→ 真機（iPhone）實測推播 → 才合併 master 上線
 - 出遊模式：家人定位（樓層、我在這、集合）→ 找人推播 → 代買／記帳，規劃見 [docs/plan-family.md](docs/plan-family.md)；使用者說「先規劃」，等確認再做，需建 Firebase 專案
 - 使用者在手機貼上 Google 金鑰（已建好、已限制網址）與 Claude 金鑰，實測真實資料與 AI
 - 手機實測真實資料（EIS 另開私人 repo，不要和本專案放一起）

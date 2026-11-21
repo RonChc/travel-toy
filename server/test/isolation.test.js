@@ -89,13 +89,17 @@ test('資料庫只存權杖雜湊，不存原文', async () => {
   for (const secret of [g.token, b.token, g.inviteCode]) assert.ok(!dump.includes(secret), '資料庫裡不能有權杖／邀請碼原文');
 });
 
-test('一直猜錯會被鎖住（429），正確的權杖在鎖住期間也先擋', async () => {
+test('一直猜錯會被擋（429），但持有正確權杖的人不受影響', async () => {
   const lim = await startBackend({ limits: { authFail: { max: 5, windowMs: 60e3 } } });
   try {
+    const g = await lim.newGroup();
     for (let i = 0; i < 5; i++) assert.equal((await lim.call('GET', '/api/state', { token: randomBytes(32).toString('base64url') })).status, 401);
     const r = await lim.call('GET', '/api/state', { token: randomBytes(32).toString('base64url') });
     assert.equal(r.status, 429);
     assert.ok(r.headers.get('retry-after'));
+    assert.equal((await lim.call('GET', '/api/state', { token: g.token })).status, 200, '正確權杖照常可用');
+    assert.equal((await lim.call('POST', '/api/join', { body: { inviteCode: randomBytes(32).toString('base64url'), name: 'x', emoji: '🐶' } })).status, 429, '猜邀請碼也受限');
+    assert.equal((await lim.call('POST', '/api/groups', { body: { createCode: 'wrong', name: 'x', memberName: 'a', emoji: '😎' } })).status, 429, '猜建立暗號也受限');
     lim.clock.t += 61e3;
     assert.equal((await lim.call('GET', '/api/state', { token: randomBytes(32).toString('base64url') })).status, 401, '時間過了就解除');
   } finally { await lim.close(); }

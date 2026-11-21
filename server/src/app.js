@@ -79,14 +79,18 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
     return typeof k === 'string' ? k.trim() : '';
   }
 
+  // 猜錯權杖／邀請碼／建立暗號：同一個 IP 一分鐘猜太多次就回 429。
+  // 只擋「猜錯的人」；持有正確權杖的人不受影響（避免放在通道後面時，一個壞人讓所有人被鎖住）。
+  function failed(req) {
+    const r = limiter.hit('authFail', clientIp(req), memberLimits.authFail);
+    if (!r.ok) throw new HttpError(429, 'too_many_attempts', '嘗試太多次，請稍後再試');
+  }
+
   function auth(req) {
-    const ip = clientIp(req);
-    // 同一個 IP 一直猜錯就先鎖住，連查都不查
-    if (!limiter.peek('authFail', ip, memberLimits.authFail)) throw new HttpError(429, 'too_many_attempts', '嘗試太多次，請稍後再試');
     const token = tokenOf(req);
     const m = token.length >= 20 && token.length <= 200 ? store.memberByToken(token) : null;
     if (!m) {
-      limiter.hit('authFail', ip, memberLimits.authFail);
+      failed(req);
       throw new HttpError(401, 'unauthorized', '請重新加入群組');
     }
     if (m.g_expires <= now()) {
@@ -155,7 +159,7 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
     const b = await readJson(req);
     // 沒有建立暗號就不能建群組：管理員＝家人＝能用老闆的金鑰
     if (!config.createCode || typeof b.createCode !== 'string' || !safeEqual(b.createCode, config.createCode)) {
-      limiter.hit('authFail', clientIp(req), memberLimits.authFail);
+      failed(req);
       throw new HttpError(403, 'bad_create_code', '建立暗號不正確');
     }
     const r = store.createGroup({
@@ -177,7 +181,7 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
     const b = await readJson(req);
     const g = typeof b.inviteCode === 'string' && b.inviteCode.length < 200 ? store.groupByInvite(b.inviteCode) : null;
     if (!g) {
-      limiter.hit('authFail', clientIp(req), memberLimits.authFail);
+      failed(req);
       throw new HttpError(404, 'invite_invalid', '邀請碼無效或已失效');
     }
     if (g.expires_at <= now()) {
