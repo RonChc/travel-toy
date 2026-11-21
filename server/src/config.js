@@ -39,6 +39,15 @@ export function parseTrustProxy(v) {
   throw new Error(`TRUST_PROXY 只能是 none、cloudflare 或 tailscale（目前是「${v}」；舊的 1 已不再支援，請依通道改成 cloudflare 或 tailscale）`);
 }
 
+// L-d：用通道（cloudflare／tailscale）時，後台只能經由通道連到，所以必須只聽本機；
+// 否則別人可直接連後台、自己帶假標頭繞過頻率限制。
+export const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];
+export function assertTrustProxyBinding(trustProxy, host) {
+  if (trustProxy === 'none' || LOOPBACK_HOSTS.includes(String(host).trim().toLowerCase())) return;
+  throw new Error(`TRUST_PROXY=${trustProxy}（有通道）時，HOST 只能是 127.0.0.1（只讓本機連），目前是「${host}」。` +
+    '否則別人可以繞過通道直接連到後台、用假標頭騙過頻率限制。請把 .env 的 HOST 改回 127.0.0.1，或把 TRUST_PROXY 改成 none。');
+}
+
 const num = (v, d) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? d : Number(v));
 const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -87,7 +96,9 @@ export function buildConfig(env = {}, overrides = {}) {
       general: { max: num(env.RL_GENERAL, 300), windowMs: 60e3 },
     },
   };
-  return { ...c, ...overrides, limits: { ...c.limits, ...(overrides.limits || {}) } };
+  const out = { ...c, ...overrides, limits: { ...c.limits, ...(overrides.limits || {}) } };
+  assertTrustProxyBinding(out.trustProxy, out.host);
+  return out;
 }
 
 export function loadConfig() {

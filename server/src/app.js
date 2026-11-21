@@ -183,10 +183,13 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
     const ip = clientIp(req);
     // 只算「猜錯」的：猜錯太多次的這個 IP 先被鎖住（連猜對也不行，否則鎖不住暴力猜測）；
     // 猜對的人不佔額度，所以一個人亂試只會鎖住他自己的 IP，不會鎖死所有人
-    if (!limiter.peek('create', ip, memberLimits.create)) {
-      throw new HttpError(429, 'too_many_attempts', '建立暗號猜錯太多次，請稍後再試');
-    }
+    const lockedMsg = '建立暗號猜錯太多次，請稍後再試';
+    // 先擋一次省得讀 body；但真正的判斷在讀完 body 之後（見下）
+    if (!limiter.peek('create', ip, memberLimits.create)) throw new HttpError(429, 'too_many_attempts', lockedMsg);
     const b = await readJson(req);
+    // 並發鎖定（L-a）：從這裡到 hit 全部同步執行、中間沒有 await。
+    // 否則攻擊者可先開很多連線卡在 body 前，再同時送出，全部都通過上面那次 peek 而繞過 5 次上限
+    if (!limiter.peek('create', ip, memberLimits.create)) throw new HttpError(429, 'too_many_attempts', lockedMsg);
     // 沒有建立暗號就不能建群組：管理員＝家人＝能用老闆的金鑰
     if (!config.createCode || typeof b.createCode !== 'string' || !safeEqual(b.createCode, config.createCode)) {
       limiter.hit('create', ip, memberLimits.create);

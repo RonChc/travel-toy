@@ -1,9 +1,9 @@
 // HME-44 資安修正：M1 來源 IP、M2 Claude 代轉白名單、L2 找人冷卻、L3 踢人換邀請碼、L4 暗號長度、L6 CORS
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { startBackend, CREATE_CODE, CLAUDE_KEY } from './helpers.js';
-import { buildConfig, parseTrustProxy } from '../src/config.js';
+import { buildConfig, parseTrustProxy, assertTrustProxyBinding } from '../src/config.js';
 import { createApp, clientIpOf, ipKey } from '../src/app.js';
 import { createLimiter } from '../src/ratelimit.js';
 import { safeEqual } from '../src/crypto.js';
@@ -465,4 +465,48 @@ test('L1 safeHttpsUrl：只放行 https，其餘（javascript:、data:、http:�
   for (const bad of ['javascript:alert(1)', 'JaVaScRiPt:alert(1)', ' javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'http://maps.google.com/', 'vbscript:x', 'file:///etc/passwd', '//evil.example/x', 'maps.google.com', '', null, undefined, 123, {}]) {
     assert.equal(safeHttpsUrl(bad), '', String(bad));
   }
+});
+
+// ======================================================= HME-46 L-a／L-d =======================================================
+test('L-a 並發：先開 60 條連線卡住 body、再同時送出（59 錯 1 對），錯的最多額度內被比對、其餘 429，猜對也擋', async () => {
+  const s = await startBackend({ limits: { create: { max: 5, windowMs: 3600e3 } } });
+  try {
+    const port = new URL(s.base).port;
+    const open = (code) => new Promise((resolve, reject) => {
+      const body = JSON.stringify({ createCode: code, name: 'x', memberName: 'a', emoji: '😎' });
+      const req = httpRequest({ host: '127.0.0.1', port, method: 'POST', path: '/api/groups', agent: false,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, (res) => {
+        res.resume(); res.on('end', () => resolve(res.statusCode));
+      });
+      req.on('error', reject);
+      req.flushHeaders(); // 只先送標頭，body 等一下一起送
+      resolve.send = () => req.end(body);
+      open.pending.push(resolve);
+    });
+    open.pending = [];
+    const results = [];
+    for (let i = 0; i < 60; i++) results.push(open(i === 30 ? CREATE_CODE : `wrong-${i}-xxxxxxxxxxxx`));
+    await new Promise((r) => setTimeout(r, 300)); // 讓 60 條連線的標頭都到達
+    for (const r of open.pending) r.send();
+    const res = await Promise.all(results);
+    const count = (st) => res.filter((x) => x === st).length;
+    assert.equal(count(201), 0, '同時送出時猜對的也不能過');
+    assert.ok(count(403) <= 5, `最多 5 個猜錯被比對，實際 ${count(403)}`);
+    assert.equal(count(403) + count(429), 60);
+    const after = await s.call('POST', '/api/groups', { body: { createCode: CREATE_CODE, name: 'x', memberName: 'a', emoji: '😎' } });
+    assert.equal(after.status, 429, '鎖定後猜對也擋');
+  } finally { await s.close(); }
+});
+
+test('L-d 有通道（cloudflare／tailscale）時 HOST 只能是本機，否則拒絕啟動並用白話說明', () => {
+  for (const mode of ['cloudflare', 'tailscale']) {
+    for (const host of ['0.0.0.0', '192.168.1.5', '::']) {
+      assert.throws(() => buildConfig({ TRUST_PROXY: mode, HOST: host }), /HOST 只能是 127\.0\.0\.1/, `${mode}＋${host}`);
+    }
+    for (const host of ['127.0.0.1', '::1', 'localhost', '']) {
+      assert.doesNotThrow(() => buildConfig({ TRUST_PROXY: mode, HOST: host }), `${mode}＋${host}`);
+    }
+  }
+  assert.doesNotThrow(() => buildConfig({ TRUST_PROXY: 'none', HOST: '0.0.0.0' }), 'none 可以聽全部');
+  assert.doesNotThrow(() => assertTrustProxyBinding('none', '0.0.0.0'));
 });
