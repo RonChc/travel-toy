@@ -128,13 +128,18 @@ test('頻率限制：找人、上傳、代轉', async () => {
   } finally { await lim.close(); }
 });
 
-test('建立群組有頻率限制', async () => {
+test('建立群組的額度只算猜錯的：猜對不佔額度，猜錯太多次只鎖那個 IP', async () => {
   const lim = await startBackend({ limits: { create: { max: 2, windowMs: 3600e3 } } });
   try {
-    await lim.newGroup();
-    await lim.newGroup();
-    const r = await lim.call('POST', '/api/groups', { body: { createCode: 'test-create-code', name: 'x', memberName: 'a', emoji: '😎' } });
-    assert.equal(r.status, 429);
+    for (let i = 0; i < 4; i++) await lim.newGroup(); // 猜對的建立多少次都不佔額度
+    const wrong = () => lim.call('POST', '/api/groups', { body: { createCode: 'wrong-code-xx', name: 'x', memberName: 'a', emoji: '😎' } });
+    assert.equal((await wrong()).status, 403);
+    assert.equal((await wrong()).status, 403);
+    assert.equal((await wrong()).status, 429, '猜錯 2 次後鎖住');
+    const right = await lim.call('POST', '/api/groups', { body: { createCode: 'test-create-code', name: 'x', memberName: 'a', emoji: '😎' } });
+    assert.equal(right.status, 429, '鎖住期間連猜對也不行（不然擋不住暴力猜）');
+    lim.clock.t += 3601e3;
+    assert.equal((await lim.newGroup()).memberId.length > 0, true, '一小時後解除');
   } finally { await lim.close(); }
 });
 

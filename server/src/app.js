@@ -1,7 +1,9 @@
 // 群組找人後台：HTTP 路由與權限檢查
 import { writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { isIP } from 'node:net';
 import { newToken, randomName, safeEqual } from './crypto.js';
+import { MIN_CREATE_CODE } from './config.js';
 import { createLimiter } from './ratelimit.js';
 import { openStore } from './store.js';
 import { createPusher } from './push.js';
@@ -12,7 +14,8 @@ import {
 
 const JSON_LIMIT = 64 * 1024;
 const PROXY_LIMIT = 2 * 1024 * 1024; // Claude 對話可能帶很多地點資料
-const ORIGINS = [/^https:\/\/ronchc\.github\.io$/, /^http:\/\/localhost(:\d+)?$/];
+const ORIGINS = [/^https:\/\/ronchc\.github\.io$/];
+const DEV_ORIGINS = [/^http:\/\/localhost(:\d+)?$/]; // 只有 DEV=1 才允許
 
 const PHOTO_TYPES = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 const MIME_BY_EXT = { '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
@@ -50,20 +53,42 @@ async function readJson(req, limit = JSON_LIMIT) {
   }
 }
 
+// 來源 IP 當作頻率限制的 key。IPv6 一個人手上通常有整段 /64，所以只看前 4 組，避免換位址就繞過限制
+export function ipKey(ip) {
+  if (isIP(ip) !== 6) return ip;
+  const [head, tail = ''] = ip.toLowerCase().split('::');
+  const a = head ? head.split(':') : [];
+  const b = tail ? tail.split(':') : [];
+  const full = ip.includes('::') ? [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill('0'), ...b] : a;
+  return `${full.slice(0, 4).map((x) => x.replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
+
+// 依 TRUST_PROXY 模式取得來源 IP；標頭不可信或格式不對時，一律退回連線本身的 IP
+export function clientIpOf(req, trustProxy) {
+  let ip = '';
+  if (trustProxy === 'cloudflare') {
+    ip = String(req.headers['cf-connecting-ip'] || '').trim();
+  } else if (trustProxy === 'tailscale') {
+    // 使用者可以自己帶 X-Forwarded-For 假裝，但通道會把真正的來源附加在最右邊，只有最右邊可信
+    const parts = String(req.headers['x-forwarded-for'] || '').split(',');
+    ip = parts[parts.length - 1].trim();
+  }
+  if (!ip || !isIP(ip)) ip = req.socket.remoteAddress || 'unknown';
+  return ipKey(ip.replace(/^::ffff:/i, ''));
+}
+
 export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, pushSender } = {}) {
+  // 建立暗號太短就拒絕啟動（空白＝沒有人能建立群組，是允許的）
+  if (config.createCode && config.createCode.length < MIN_CREATE_CODE) {
+    throw new Error(`GROUP_CREATE_CODE 至少要 ${MIN_CREATE_CODE} 個字元（目前 ${config.createCode.length} 個），請重新執行 npm run setup 或自己改長一點`);
+  }
   const store = openStore({ dbFile: config.dbFile, dataDir: config.dataDir, now });
   const limiter = createLimiter(now);
   const pusher = createPusher(config, pushSender);
-  const allowedOrigin = (o) => ORIGINS.some((re) => re.test(o)) || config.extraOrigins.includes(o);
+  const allowedOrigin = (o) => ORIGINS.some((re) => re.test(o)) || (config.dev && DEV_ORIGINS.some((re) => re.test(o))) || config.extraOrigins.includes(o);
   const memberLimits = config.limits;
 
-  const clientIp = (req) => {
-    if (config.trustProxy) {
-      const f = req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-      if (f) return f;
-    }
-    return req.socket.remoteAddress || 'unknown';
-  };
+  const clientIp = (req) => clientIpOf(req, config.trustProxy);
 
   const send = (res, status, body, extra = {}) => {
     const data = JSON.stringify(body);
@@ -100,8 +125,8 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
     return m;
   }
 
-  function limit(bucket, key) {
-    const r = limiter.hit(bucket, key, memberLimits[bucket]);
+  function limit(bucket, key, cost = 1) {
+    const r = limiter.hit(bucket, key, memberLimits[bucket], cost);
     if (!r.ok) throw new HttpError(429, 'rate_limited', `操作太頻繁，請 ${r.retryAfter} 秒後再試`);
   }
 
@@ -155,10 +180,16 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
   route('GET', /^\/api\/emojis$/, false, ({ res }) => send(res, 200, { emojis: EMOJIS }));
 
   route('POST', /^\/api\/groups$/, false, async ({ req, res }) => {
-    limit('create', clientIp(req));
+    const ip = clientIp(req);
+    // 只算「猜錯」的：猜錯太多次的這個 IP 先被鎖住（連猜對也不行，否則鎖不住暴力猜測）；
+    // 猜對的人不佔額度，所以一個人亂試只會鎖住他自己的 IP，不會鎖死所有人
+    if (!limiter.peek('create', ip, memberLimits.create)) {
+      throw new HttpError(429, 'too_many_attempts', '建立暗號猜錯太多次，請稍後再試');
+    }
     const b = await readJson(req);
     // 沒有建立暗號就不能建群組：管理員＝家人＝能用老闆的金鑰
     if (!config.createCode || typeof b.createCode !== 'string' || !safeEqual(b.createCode, config.createCode)) {
+      limiter.hit('create', ip, memberLimits.create);
       failed(req);
       throw new HttpError(403, 'bad_create_code', '建立暗號不正確');
     }
@@ -229,9 +260,18 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
       targets = [t];
     }
     if (!targets.length) throw new HttpError(400, 'nobody', '群組裡還沒有其他人');
-    limit('find', m.id);
+    // 同一對（發問者→目標）冷卻：冷卻中的不再通知（避免連按轟炸同一個人）
+    const pairKey = (t) => `${m.id}>${t.id}`;
+    const eligible = targets.filter((t) => limiter.peek('findPair', pairKey(t), memberLimits.findPair));
+    if (!eligible.length) {
+      const wait = Math.max(...targets.map((t) => limiter.retryAfter('findPair', pairKey(t))));
+      throw new HttpError(429, 'find_cooldown', `剛剛才問過，請 ${wait} 秒後再問一次`);
+    }
+    limit('find', m.id, eligible.length); // 一次問全部＝問幾個人就算幾次
+    for (const t of eligible) limiter.hit('findPair', pairKey(t), memberLimits.findPair);
+    const skipped = targets.filter((t) => !eligible.includes(t));
     const since = now() - config.findTtlMs;
-    const out = await Promise.all(targets.map(async (t) => {
+    const out = await Promise.all(eligible.map(async (t) => {
       // 已經問過還沒回的就沿用同一筆（再通知一次），不重複建立
       const open = store.openAsk(m.group_id, m.id, t.id, since);
       const id = open ? open.id : store.createFind(m.group_id, m.id, t.id);
@@ -240,7 +280,7 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
       });
       return { id, targetId: t.id, pushed };
     }));
-    send(res, 201, { finds: out });
+    send(res, 201, { finds: out, skipped: skipped.map((t) => t.id) });
   });
 
   const findOr404 = (m, id) => {
@@ -319,7 +359,8 @@ export function createApp({ config, now = () => Date.now(), fetchImpl = fetch, p
     if (!t) throw new HttpError(404, 'member_not_found', '找不到這個成員');
     if (t.is_admin) throw new HttpError(400, 'admin_fixed', '管理員不能踢自己，要結束請解散群組');
     store.deleteMember(t.id, m.group_id);
-    send(res, 200, { ok: true });
+    // 踢人後自動重發邀請碼：被踢的人手上若還有舊邀請連結，不能再用它加回來
+    send(res, 200, { ok: true, inviteCode: store.resetInvite(m.group_id) });
   });
 
   route('POST', /^\/api\/invite\/reset$/, true, ({ res, m }) => {

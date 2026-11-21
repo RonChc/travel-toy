@@ -214,7 +214,7 @@ async function planTripRaw({ apiKey, prompt, searchPlaces, onTurn, onText, onSta
     onStatus(turn === 0 ? 'AI 思考中…' : 'AI 整理中…');
     const stream = client.beta.messages.stream({
       model: MODEL,
-      max_tokens: 64000,
+      max_tokens: 16000, // 群組後台代轉單次上限 16000
       ...FALLBACK,
       output_config: { effort: 'medium' },
       system: PLAN_SYSTEM,

@@ -169,6 +169,31 @@ try {
     check(!siteRequests.some((u) => u.includes('join=')), `邀請碼不應出現在送給網站主機的請求網址：${siteRequests.filter((u) => u.includes('join=')).join(',')}`);
   });
 
+  await step('L1：邀請連結的伺服器和手機已設定的不同 → 先跳確認，按取消就不會把邀請碼送出去；按確定才繼續', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'zh-TW' });
+    try {
+      await ctx.addInitScript(() => { try { localStorage.setItem('travel-toy-group-server', 'https://other-server.example.com'); } catch { /* 略過 */ } });
+      const page = await ctx.newPage();
+      const infoCalls = [];
+      page.on('request', (r) => { if (r.url().includes('/api/invite/info')) infoCalls.push(r.url()); });
+      const msgs = [];
+      let answer = false;
+      page.on('dialog', async (d) => { msgs.push(d.message()); answer ? await d.accept() : await d.dismiss(); });
+      await page.goto(inviteLink);
+      await waitFor(async () => msgs.length === 1, 8000, '確認視窗');
+      await sleep(600);
+      check(msgs[0].includes('other-server.example.com') && msgs[0].includes('127.0.0.1'), '確認視窗要同時列出兩個伺服器：' + msgs[0]);
+      check(infoCalls.length === 0, '按取消前不能把邀請碼送出去');
+      check((await page.locator('#group-join-dialog[open]').count()) === 0, '取消後不能出現加入視窗');
+      answer = true;
+      await page.goto('about:blank'); // 只差 # 後面的網址不會重新載入，先離開
+      await page.goto(inviteLink);
+      await page.waitForSelector('#group-join-dialog[open]', { timeout: 8000 });
+      check(infoCalls.length === 1, '確定後才向邀請連結的伺服器查詢');
+      return '取消：沒送出邀請碼；確定：開啟加入視窗';
+    } finally { await ctx.close(); }
+  });
+
   // ===== 3. B 開啟通知（訂閱）=====
   await step('B／A：開啟通知並向後台登記訂閱', async () => {
     const out = [];
@@ -327,7 +352,23 @@ try {
     const c = backend.upstream.calls.find((x) => x.url.startsWith('/v1/messages'));
     check(c && c.headers['x-api-key'] === CLAUDE_KEY, '上游收到的是老闆的 Claude 金鑰');
     await shot(B, '10-B家人-AI幫我挑走代轉');
-    return '上游收到 Claude 請求，金鑰由後台帶入';
+    const sent = JSON.parse(c.body);
+    check(sent.max_tokens <= 16000 && Object.keys(sent).every((k) => ['model', 'max_tokens', 'fallbacks', 'output_config', 'system', 'messages'].includes(k)), '後台重組後只剩白名單欄位：' + Object.keys(sent));
+    return `上游收到 Claude 請求，金鑰由後台帶入；實際欄位 ${Object.keys(sent).join('/')}，anthropic-beta=${c.headers['anthropic-beta']}`;
+  });
+
+  await step('B（家人）「AI 行程」（串流＋自訂工具 search_places）也通過後台白名單、送到上游', async () => {
+    backend.upstream.calls.length = 0;
+    await B.page.click('.view-btn[data-view="plan"]');
+    await B.page.fill('#plan-request', '下雨天想去室內景點');
+    await B.page.click('#plan-go');
+    const c = await waitFor(async () => backend.upstream.calls.find((x) => x.url.startsWith('/v1/messages') && x.body.includes('"stream":true')), 20000, 'AI 行程請求');
+    const sent = JSON.parse(c.body);
+    check(sent.tools?.[0]?.name === 'search_places' && sent.tools[0].strict === true && sent.tools[0].eager_input_streaming === true, '自訂工具原樣送到上游');
+    check(sent.max_tokens === 16000 && sent.fallbacks === 'default', 'max_tokens／fallbacks');
+    check(!/規劃失敗：.*(max_tokens|不開放|工具)/.test((await B.page.textContent('#plan-status')) || ''), '沒有被後台白名單擋下');
+    await B.page.click('.view-btn[data-view="nearby"]');
+    return `欄位 ${Object.keys(sent).join('/')}，beta=${c.headers['anthropic-beta']}`;
   });
 
   await step('B 手機裡完全看不到老闆的金鑰（localStorage、所有後台回應、頁面文字）', async () => {

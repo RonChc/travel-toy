@@ -6,6 +6,7 @@ import * as mockApi from './mock.js';
 import * as realAi from './ai.js';
 import * as group from './group.js';
 import { VIA_PROXY } from './gateway.js';
+import { safeHttpsUrl } from './safeurl.js';
 
 const MOCK = new URLSearchParams(location.search).has('mock');
 const api = MOCK ? mockApi : realApi;
@@ -473,9 +474,16 @@ function card(p) {
     ? `<div class="hl">👍 ${esc(hl)}</div>`
     : (state.hlPending.has(p.id) && !state.highlights.has(p.id) ? '<div class="hl hl-wait">整理招牌中…</div>' : '');
 
+  // 網址一律先檢查是 https:（Google 回傳的 googleMapsUri 也不盲目信任）；不合格就只顯示名稱、不做成連結
+  const mapsHref = safeHttpsUrl(p.googleMapsUri);
+  const nameHtml = mapsHref
+    ? `<a class="name" href="${esc(mapsHref)}" target="_blank" rel="noopener">${esc(p.displayName?.text)}</a>`
+    : `<span class="name">${esc(p.displayName?.text)}</span>`;
+  const navHref = safeHttpsUrl(navUrl(p));
+
   return `<li class="card${reason ? ' picked' : ''}">
     <div class="card-main">
-      <a class="name" href="${esc(p.googleMapsUri)}" target="_blank" rel="noopener">${esc(p.displayName?.text)}</a>
+      ${nameHtml}
       <div class="meta">${rating}</div>
       <div class="tags">${tags.join('')}</div>
       ${hlLine}
@@ -483,7 +491,7 @@ function card(p) {
       ${reason ? `<div class="ai-reason">AI：${esc(reason)}</div>` : ''}
       <div class="addr">${esc(p.shortFormattedAddress)}</div>
     </div>
-    <a class="nav-btn" href="${esc(navUrl(p))}" target="_blank" rel="noopener" aria-label="導航">導航</a>
+    ${navHref ? `<a class="nav-btn" href="${esc(navHref)}" target="_blank" rel="noopener" aria-label="導航">導航</a>` : ''}
   </li>`;
 }
 
@@ -813,7 +821,10 @@ function renderPlan(text, places) {
     let html = esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     for (const n of names) {
       const safe = esc(n);
-      if (html.includes(safe)) html = html.split(safe).join(`<a href="${esc(places.get(n))}" target="_blank" rel="noopener">${safe}</a>`);
+      if (html.includes(safe)) {
+        const href = safeHttpsUrl(places.get(n)); // 只把 https 網址做成連結
+        if (href) html = html.split(safe).join(`<a href="${esc(href)}" target="_blank" rel="noopener">${safe}</a>`);
+      }
     }
     return html;
   };

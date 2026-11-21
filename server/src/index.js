@@ -3,8 +3,15 @@ import { createServer } from 'node:http';
 import { loadConfig } from './config.js';
 import { createApp } from './app.js';
 
-const config = loadConfig();
-const app = createApp({ config });
+let config;
+let app;
+try {
+  config = loadConfig();
+  app = createApp({ config });
+} catch (e) {
+  console.error('❌ 後台無法啟動：' + e.message);
+  process.exit(1);
+}
 
 if (!config.createCode) console.warn('⚠️  .env 沒有 GROUP_CREATE_CODE，沒有人能建立群組（請先執行 npm run setup）');
 if (!config.googleApiKey && !config.anthropicApiKey) console.warn('ℹ️  沒有設定 GOOGLE_API_KEY／ANTHROPIC_API_KEY，家人代轉功能會回 503');

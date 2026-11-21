@@ -16,7 +16,7 @@ if (existsSync(file)) {
 const vapid = webpush.generateVAPIDKeys();
 const example = readFileSync(join(SERVER_DIR, '.env.example'), 'utf8');
 const filled = example
-  .replace(/^GROUP_CREATE_CODE=.*$/m, `GROUP_CREATE_CODE=${randomBytes(9).toString('base64url')}`)
+  .replace(/^GROUP_CREATE_CODE=.*$/m, `GROUP_CREATE_CODE=${randomBytes(12).toString('base64url')}`)
   .replace(/^VAPID_PUBLIC_KEY=.*$/m, `VAPID_PUBLIC_KEY=${vapid.publicKey}`)
   .replace(/^VAPID_PRIVATE_KEY=.*$/m, `VAPID_PRIVATE_KEY=${vapid.privateKey}`);
 writeFileSync(file, filled, { mode: 0o600 });

@@ -179,6 +179,20 @@ async function openJoin({ code, server }) {
   if (me) return ENV.toast('你已經在一個群組裡了，要加入新的請先離開目前的群組');
   const norm = normalizeServer(server || getServer());
   if (!norm) { ENV.toast('邀請連結的伺服器網址不正確'); return; }
+  // 邀請連結帶的伺服器和這支手機已設定的不同：先讓使用者看清楚再繼續（還沒把邀請碼送出去之前就問）
+  const local = normalizeServer(getServer());
+  if (server && local && local !== norm
+    && !confirm(`這個邀請連結要連到另一台伺服器：
+
+${new URL(norm).host}
+
+你目前設定的是：
+${new URL(local).host}
+
+只有確定是認識的人傳來的才繼續。要加入嗎？`)) {
+    ENV.toast('已取消加入');
+    return;
+  }
   try {
     const info = await callJson('POST', '/api/invite/info', { auth: false, server: norm, body: { inviteCode: code } });
     pendingJoin = { code, server: norm };
@@ -659,10 +673,11 @@ async function setTier(m, tier) {
 }
 
 async function kick(m) {
-  if (!confirm(`要把「${m.name}」踢出群組嗎？他的位置和照片會被刪除。`)) return;
+  if (!confirm(`要把「${m.name}」踢出群組嗎？他的位置和照片會被刪除，邀請連結也會自動換成新的。`)) return;
   try {
-    await call('DELETE', `/api/members/${m.id}`);
-    ENV.toast(`${m.name} 已被移出群組`);
+    const r = await callJson('DELETE', `/api/members/${m.id}`);
+    if (r?.inviteCode) { me.inviteCode = r.inviteCode; saveMe(); renderInvite(); } // 後台踢人時已自動換新邀請碼，舊連結失效
+    ENV.toast(`${m.name} 已被移出群組，邀請碼已自動更新（舊的邀請連結失效）`);
   } catch (err) { ENV.toast(err.message); }
   refresh();
 }

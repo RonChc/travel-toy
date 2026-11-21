@@ -63,13 +63,13 @@ export async function startBackend(overrides = {}) {
     ctx.onPush?.(rec);
   };
   const config = buildConfig({}, {
-    dataDir, dbFile: ':memory:', createCode: CREATE_CODE,
+    dataDir, dbFile: ':memory:', createCode: CREATE_CODE, dev: true, // dev：測試與 E2E 用 http://localhost 當前端來源
     googleApiKey: GOOGLE_KEY, anthropicApiKey: CLAUDE_KEY,
     googleBase: upstream.url, anthropicBase: upstream.url,
     vapidPublic: 'x', vapidPrivate: 'y',
     // 一般測試不要被頻率限制擋住；要測頻率的測試自己覆寫
-    limits: Object.fromEntries(['authFail', 'create', 'join', 'find', 'upload', 'proxy', 'location', 'general'].map((k) => [k, { max: 100000, windowMs: 60e3 }])),
     ...overrides,
+    limits: { ...Object.fromEntries(['authFail', 'create', 'join', 'find', 'findPair', 'upload', 'proxy', 'location', 'general'].map((k) => [k, { max: 100000, windowMs: 60e3 }])), ...(overrides.limits || {}) },
   });
   const app = createApp({ config, now: () => clock.t, pushSender });
   const server = createServer(app.handler);

@@ -117,7 +117,7 @@ test('Claude 串流（AI 行程）能邊收邊轉，?beta=true 也行', async ()
   const { g } = await setup();
   s.upstream.calls.length = 0;
   const r = await s.call('POST', '/api/proxy/anthropic/v1/messages?beta=true&evil=1', {
-    token: g.token, body: { model: 'claude-opus-5-5', max_tokens: 100, stream: true, messages: [] },
+    token: g.token, body: { model: 'claude-opus-5-5', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] },
     headers: { 'anthropic-beta': 'server-side-fallback-2026-07-01' },
   });
   assert.equal(r.status, 200);
@@ -158,7 +158,7 @@ test('沒帶權杖、亂寫權杖，一律 401', async () => {
   // Claude SDK 把權杖放在 x-api-key
   const { g } = await setup();
   const viaApiKey = await s.call('POST', '/api/proxy/anthropic/v1/messages', {
-    body: { model: 'claude-haiku-5-5', max_tokens: 10, messages: [] }, headers: { 'x-api-key': g.token },
+    body: { model: 'claude-haiku-5-5', max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }, headers: { 'x-api-key': g.token },
   });
   assert.equal(viaApiKey.status, 200);
 });
