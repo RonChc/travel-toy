@@ -68,7 +68,7 @@ export function openStore({ dbFile, dataDir, now = () => Date.now() }) {
     memberByToken: q('SELECT m.*, g.expires_at AS g_expires, g.name AS g_name FROM members m JOIN groups g ON g.id = m.group_id WHERE m.token_hash = ?'),
     groupByInvite: q('SELECT * FROM groups WHERE invite_hash = ?'),
     groupById: q('SELECT * FROM groups WHERE id = ?'),
-    members: q('SELECT * FROM members WHERE group_id = ? ORDER BY created_at, id'),
+    members: q('SELECT * FROM members WHERE group_id = ? ORDER BY is_admin DESC, created_at, id'),
     member: q('SELECT * FROM members WHERE id = ? AND group_id = ?'),
     memberCount: q('SELECT COUNT(*) AS n FROM members WHERE group_id = ?'),
     setTier: q('UPDATE members SET tier = ? WHERE id = ? AND group_id = ? AND is_admin = 0'),

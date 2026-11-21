@@ -1,4 +1,6 @@
 // Google Places API (New) 與 Routes API，直接從瀏覽器呼叫（金鑰需設定 HTTP referrer 限制）
+// key 若是 VIA_PROXY，改走群組後台代轉（後台帶老闆的金鑰，手機上不會有金鑰）
+import { VIA_PROXY, gateway, googleProxyUrl, ProxyDenied } from './gateway.js';
 
 const PLACES = 'https://places.googleapis.com/v1/places';
 const ROUTES = 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix';
@@ -11,18 +13,15 @@ const PLACE_FIELDS = [
 ].map((f) => `places.${f}`).join(',');
 
 async function post(url, body, fieldMask, key) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': key,
-      'X-Goog-FieldMask': fieldMask,
-    },
-    body: JSON.stringify(body),
-  });
+  const viaProxy = key === VIA_PROXY;
+  const headers = { 'Content-Type': 'application/json', 'X-Goog-FieldMask': fieldMask };
+  if (viaProxy) headers.Authorization = `Bearer ${gateway.token}`;
+  else headers['X-Goog-Api-Key'] = key;
+  const res = await fetch(viaProxy ? googleProxyUrl(url) : url, { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const msg = (Array.isArray(data) ? data[0] : data)?.error?.message;
+    if (viaProxy && res.status === 403 && data?.error === 'friend_no_proxy') throw new ProxyDenied();
+    const msg = (Array.isArray(data) ? data[0] : data)?.error?.message || data?.message;
     throw new Error(msg || `HTTP ${res.status}`);
   }
   return data;

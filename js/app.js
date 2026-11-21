@@ -4,6 +4,8 @@ import { isOpenAt, hoursOn, fmtClock } from './hours.js';
 import * as realApi from './api.js';
 import * as mockApi from './mock.js';
 import * as realAi from './ai.js';
+import * as group from './group.js';
+import { VIA_PROXY } from './gateway.js';
 
 const MOCK = new URLSearchParams(location.search).has('mock');
 const api = MOCK ? mockApi : realApi;
@@ -65,8 +67,12 @@ const state = {
   when: null, // 什麼時候去：null = 現在，或 { day: 0|1|2（今天起算）, time: 'HH:MM' }
 };
 
+// 自己有金鑰就直連；沒有但在群組裡是「家人」，就走群組後台代轉（金鑰只在後台）
+const googleKey = () => state.key || (group.canUseProxy() ? VIA_PROXY : '');
+const claudeKey = () => state.claudeKey || (group.canUseProxy() ? VIA_PROXY : '');
+
 const sortKey = () => (state.view === 'route' ? 'sortRoute' : 'sortNearby');
-const isSearchView = () => state.view !== 'plan';
+const isSearchView = () => state.view === 'nearby' || state.view === 'route';
 
 // ---------- 工具 ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -95,10 +101,14 @@ function toast(msg) {
   toast.t = setTimeout(() => { el.hidden = true; }, 3500);
 }
 
+function noKeyMessage(what) {
+  return group.isFriend() ? `你在群組裡是「朋友」，請自己輸入 ${what} 金鑰` : `請先輸入 ${what} 金鑰`;
+}
+
 function requireKey() {
-  if (MOCK || state.key) return true;
+  if (MOCK || googleKey()) return true;
   openSettings();
-  toast('請先輸入 Google API 金鑰');
+  toast(noKeyMessage('Google API'));
   return false;
 }
 
@@ -210,7 +220,7 @@ async function searchAddress(e) {
   if (!text || !requireKey()) return;
   try {
     $('#origin-label').textContent = '搜尋地點中…';
-    const o = await api.geocode(state.key, text);
+    const o = await api.geocode(googleKey(), text);
     setOrigin({ ...o, label: `📌 ${o.label}` });
     $('#address').blur();
   } catch (err) {
@@ -221,7 +231,7 @@ async function searchAddress(e) {
 
 const geoCache = new Map();
 async function geocodeCached(text) {
-  if (!geoCache.has(text)) geoCache.set(text, await api.geocode(state.key, text));
+  if (!geoCache.has(text)) geoCache.set(text, await api.geocode(googleKey(), text));
   return geoCache.get(text);
 }
 
@@ -239,7 +249,7 @@ async function ensureRoute() {
   const r = state.route;
   if (r && r.mode === state.mode && r.a.text === a.text && r.b.text === b.text
     && r.a.lat === a.lat && r.a.lng === a.lng) return r;
-  const res = await api.computeRoute(state.key, a, b, state.mode);
+  const res = await api.computeRoute(googleKey(), a, b, state.mode);
   state.route = { ...res, a, b, mode: state.mode };
   renderRouteSummary();
   return state.route;
@@ -267,24 +277,24 @@ const vegFirst = () => !!state.party.veg;
 const vegQueries = (q) => (vegFirst() && q.cat?.food ? ['素食'] : []);
 
 function fetchNearby(q, origin, radius) {
-  if (q.text) return settle([api.searchText(state.key, q.text, origin, radius)]);
+  if (q.text) return settle([api.searchText(googleKey(), q.text, origin, radius)]);
   const cat = q.cat;
   const jobs = [];
   if (cat.types) {
-    jobs.push(api.searchNearby(state.key, origin, radius, cat.types).catch((err) => {
+    jobs.push(api.searchNearby(googleKey(), origin, radius, cat.types).catch((err) => {
       if (!cat.fallbackTypes) throw err;
-      return api.searchNearby(state.key, origin, radius, cat.fallbackTypes);
+      return api.searchNearby(googleKey(), origin, radius, cat.fallbackTypes);
     }));
   }
   for (const t of [...(cat.queries || []), ...vegQueries(q)]) {
-    jobs.push(api.searchText(state.key, t, origin, radius, serverOpenNow(q)));
+    jobs.push(api.searchText(googleKey(), t, origin, radius, serverOpenNow(q)));
   }
   return settle(jobs);
 }
 
 function fetchAlong(q, route) {
   const texts = q.text ? [q.text] : [...(q.cat.queries || q.cat.alongQueries || [q.cat.name]), ...vegQueries(q)];
-  return settle(texts.map((t) => api.searchAlongRoute(state.key, t, route.polyline, route.a, state.mode)));
+  return settle(texts.map((t) => api.searchAlongRoute(googleKey(), t, route.polyline, route.a, state.mode)));
 }
 
 function startSearch(query) {
@@ -369,7 +379,7 @@ async function ensureRoutes(id = state.searchId) {
   if (!todo.length) return renderList();
   setStatus(`計算${modeWord()}時間中…`);
   try {
-    const res = await api.routeMatrix(state.key, state.origin, todo.map((p) => p.loc), mode);
+    const res = await api.routeMatrix(googleKey(), state.origin, todo.map((p) => p.loc), mode);
     if (id !== state.searchId) return;
     todo.forEach((p, i) => cache.set(p.id, res[i]));
   } catch (err) {
@@ -530,7 +540,7 @@ function renderList() {
   }
   const all = visiblePlaces();
   const shown = all.slice(0, state.showCount);
-  const need = state.claudeKey || MOCK ? shown.filter((p) => p.reviews?.length
+  const need = claudeKey() || MOCK ? shown.filter((p) => p.reviews?.length
     && !state.highlights.has(p.id) && !state.hlPending.has(p.id) && !state.hlFailed.has(p.id)) : [];
   need.forEach((p) => state.hlPending.add(p.id));
   list.innerHTML = shown.map(card).join('');
@@ -559,14 +569,24 @@ function renderCategories() {
     </button>`).join('');
 }
 
+// 群組裡的「朋友」沒有自己的金鑰時，提醒這幾個功能要自己輸入金鑰
+function syncKeyBanner() {
+  const show = !MOCK && group.isFriend() && !state.key && (state.view === 'nearby' || state.view === 'route' || state.view === 'plan');
+  $('#key-banner').hidden = !show;
+}
+
 function syncControls() {
   document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === state.mode));
   document.querySelectorAll('.view-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
   const route = state.view === 'route';
-  $('#nearby-panel').hidden = route;
+  const grp = state.view === 'group';
+  $('#nearby-panel').hidden = route || grp;
   $('#route-form').hidden = !route;
   $('#search-ui').hidden = !isSearchView();
-  $('#plan-ui').hidden = isSearchView();
+  $('#plan-ui').hidden = state.view !== 'plan';
+  $('#group-ui').hidden = !grp;
+  document.querySelector('.mode').hidden = grp;
+  syncKeyBanner();
   $('#radius').hidden = route;
   $('#detour').hidden = !route;
   $('#sort').innerHTML = SORTS[route ? 'route' : 'nearby'].map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
@@ -582,6 +602,7 @@ function syncControls() {
 function openSettings() {
   $('#api-key').value = state.key;
   $('#claude-key').value = state.claudeKey;
+  $('#group-server').value = group.getServer();
   $('#settings').showModal();
 }
 
@@ -629,9 +650,9 @@ async function shareSetup() {
 }
 
 function requireClaudeKey() {
-  if (MOCK || state.claudeKey) return true;
+  if (MOCK || claudeKey()) return true;
   openSettings();
-  toast('請先輸入 Claude API 金鑰');
+  toast(noKeyMessage('Claude API'));
   return false;
 }
 
@@ -718,7 +739,7 @@ async function aiPick() {
   btn.textContent = 'AI 思考中…';
   try {
     const res = await ai.recommend({
-      apiKey: state.claudeKey,
+      apiKey: claudeKey(),
       party: state.party,
       context: searchContext(),
       places: candidates.map(placeForAi),
@@ -743,7 +764,7 @@ async function aiPick() {
 async function fillHighlights(places) {
   try {
     const items = await ai.highlights({
-      apiKey: state.claudeKey,
+      apiKey: claudeKey(),
       places: places.map((p) => ({
         id: p.id,
         名稱: p.displayName?.text,
@@ -769,7 +790,7 @@ async function fillHighlights(places) {
 // 給 AI 的搜尋工具：用 Google 搜尋真實地點並整理成精簡資料
 async function searchForPlan(center, date, query, near) {
   const base = near ? await geocodeCached(near) : center;
-  const raw = await api.searchText(state.key, query, base, 5000);
+  const raw = await api.searchText(googleKey(), query, base, 5000);
   return raw.filter((p) => p.location).slice(0, 8).map((p) => {
     const loc = { lat: p.location.latitude, lng: p.location.longitude };
     return {
@@ -842,7 +863,7 @@ async function planTrip(e) {
   out.textContent = '';
   try {
     const res = await ai.planTrip({
-      apiKey: state.claudeKey,
+      apiKey: claudeKey(),
       prompt,
       searchPlaces: (query, near) => searchForPlan(center, date, query, near),
       onTurn: () => { out.textContent = ''; },
@@ -870,6 +891,7 @@ function bind() {
     state.view = b.dataset.view;
     savePrefs();
     syncControls();
+    if (state.view === 'group') return group.onShow();
     if (state.view === 'plan') return;
     state.places = [];
     renderList();
@@ -977,6 +999,10 @@ function bind() {
   $('#open-settings').addEventListener('click', openSettings);
   $('#settings-form').addEventListener('submit', (e) => {
     if (e.submitter?.value !== 'save') return;
+    if (!group.setServer($('#group-server').value)) {
+      e.preventDefault();
+      return toast('群組伺服器網址不正確（要用 https:// 開頭）');
+    }
     const code = $('#setup-code').value.trim();
     $('#setup-code').value = '';
     if (code) {
@@ -1028,6 +1054,30 @@ function bind() {
   });
 }
 
+function initGroupTab() {
+  const deep = group.initGroup({
+    toast,
+    getHere: () => state.here,
+    onChange: () => { syncKeyBanner(); if (state.view !== 'group') renderList(); },
+    openSettings,
+    fmtDist,
+    haversine,
+  });
+  $('#key-banner-settings').addEventListener('click', openSettings);
+  if (deep.join) {
+    state.view = 'group';
+    savePrefs();
+    syncControls();
+    group.openJoin({ code: deep.join, server: deep.server });
+  } else if (deep.find) {
+    state.view = 'group';
+    syncControls();
+    group.openFromNotification(deep.kind, deep.find);
+  } else if (state.view === 'group') {
+    group.onShow();
+  }
+}
+
 function init() {
   if (MOCK) document.body.classList.add('mock');
   renderCategories();
@@ -1037,6 +1087,7 @@ function init() {
   bind();
   renderList();
   locateMe();
+  initGroupTab();
   if ('serviceWorker' in navigator && !MOCK) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 

@@ -31,10 +31,21 @@ export async function startUpstream() {
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' }));
+      // 給 App 的「AI 幫我挑」一個合法的結構化回覆
+      const text = JSON.stringify({ summary: '假 AI：推薦假店家', picks: [{ id: 'p1', reason: '測試用理由' }], tips: '' });
+      return res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', content: [{ type: 'text', text }], stop_reason: 'end_turn' }));
+    }
+    if (req.url.includes('computeRouteMatrix')) {
+      let n = 1;
+      try { n = JSON.parse(body).destinations.length; } catch { /* 略過 */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(Array.from({ length: n }, (_, i) => ({ originIndex: 0, destinationIndex: i, duration: `${300 + i * 60}s`, distanceMeters: 400 + i * 100, condition: 'ROUTE_EXISTS' }))));
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ places: [{ id: 'p1', displayName: { text: '假店家' } }] }));
+    res.end(JSON.stringify({ places: [{
+      id: 'p1', displayName: { text: '假店家' }, location: { latitude: 25.0335, longitude: 121.5655 }, rating: 4.5, userRatingCount: 321,
+      primaryType: 'park', primaryTypeDisplayName: { text: '公園' }, types: ['park'], googleMapsUri: 'https://maps.google.com/?cid=1', shortFormattedAddress: '測試路 1 號',
+    }] }));
   });
   const port = await listen(server);
   return { port, calls, url: `http://127.0.0.1:${port}`, close: () => server.close() };
@@ -47,7 +58,9 @@ export async function startBackend(overrides = {}) {
   const pushes = [];
   const pushSender = async (sub, payload) => {
     if (sub.endpoint.includes('gone')) { const e = new Error('gone'); e.statusCode = 410; throw e; }
-    pushes.push({ endpoint: sub.endpoint, payload: JSON.parse(payload) });
+    const rec = { endpoint: sub.endpoint, payload: JSON.parse(payload) };
+    pushes.push(rec);
+    ctx.onPush?.(rec);
   };
   const config = buildConfig({}, {
     dataDir, dbFile: ':memory:', createCode: CREATE_CODE,
@@ -78,6 +91,7 @@ export async function startBackend(overrides = {}) {
   };
 
   const ctx = {
+    onPush: null, // E2E 用：收到推播時的回呼
     base, app, upstream, clock, pushes, dataDir, config, call,
     photoFiles: () => readdirSync(join(dataDir, 'photos')),
     async newGroup(name = '週末出遊') {

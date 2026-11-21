@@ -1,23 +1,33 @@
 // Claude：幫忙從搜尋結果挑店、規劃一日行程
 // 瀏覽器直接呼叫（金鑰只存在使用者手機），SDK 從 CDN 載入，用到才下載
 
+import { VIA_PROXY, gateway, anthropicProxyBase, ProxyDenied } from './gateway.js';
+
 const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.3.0/+esm';
 const MODEL = 'claude-opus-5-5';
 // 被安全機制拒答時，由伺服器自動改用建議的備用模型重跑
 const FALLBACK = { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' };
 const MAX_TURNS = 12;
 
-let cached = { key: null, client: null };
+// apiKey 若是 VIA_PROXY：SDK 的 baseURL 指到群組後台，apiKey 欄位放的是成員權杖（不是 Claude 金鑰）
+let cached = { id: null, client: null };
 async function getClient(apiKey) {
-  if (cached.key !== apiKey) {
+  const viaProxy = apiKey === VIA_PROXY;
+  const id = viaProxy ? `${gateway.base}|${gateway.token}` : apiKey;
+  if (cached.id !== id) {
     const { default: Anthropic } = await import(SDK_URL);
-    cached = { key: apiKey, client: new Anthropic({ apiKey, dangerouslyAllowBrowser: true }) };
+    const opts = viaProxy
+      ? { apiKey: gateway.token, baseURL: anthropicProxyBase(), dangerouslyAllowBrowser: true }
+      : { apiKey, dangerouslyAllowBrowser: true };
+    cached = { id, client: new Anthropic(opts) };
   }
   return cached.client;
 }
 
 // API 錯誤轉成看得懂的中文
 function friendly(err) {
+  if (err?.status === 403 && /friend_no_proxy/.test(JSON.stringify(err?.error ?? err?.message ?? ''))) return new ProxyDenied();
+  if (err?.status === 429 && /daily_limit/.test(JSON.stringify(err?.error ?? err?.message ?? ''))) return new Error('今天的 AI 次數用完了，明天再用');
   const msg = String(err?.error?.error?.message || err?.message || err);
   if (err?.status === 401) return new Error('Claude 金鑰無效，請到設定重新貼上');
   if (err?.status === 429) return new Error('請求太頻繁，稍等一下再試');

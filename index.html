@@ -26,6 +26,7 @@
       <button class="view-btn" data-view="nearby"><span class="vi">📍</span>附近</button>
       <button class="view-btn" data-view="route"><span class="vi">🛣️</span>順路</button>
       <button class="view-btn" data-view="plan"><span class="vi">✨</span>AI 行程</button>
+      <button class="view-btn" data-view="group"><span class="vi">👥</span>群組</button>
     </div>
 
     <div id="nearby-panel" class="panel">
@@ -56,6 +57,7 @@
   </header>
 
   <main>
+    <p id="key-banner" class="key-banner" hidden>👥 你在群組裡是「朋友」，不能用共用金鑰。附近、順路、AI 請到 <button type="button" class="link-btn" id="key-banner-settings">⚙️ 設定</button> 自己輸入金鑰。</p>
     <div id="search-ui">
       <form id="kw-form" class="row-form">
         <input id="kw" type="search" placeholder="搜尋關鍵字，例如：牛肉湯" enterkeyhint="search" autocomplete="off">
@@ -135,6 +137,35 @@
       <p id="plan-status" class="status" aria-live="polite"></p>
       <article id="plan-output" class="plan-output" hidden></article>
     </form>
+
+    <section id="group-ui" class="group" hidden>
+      <div id="group-off">
+        <p class="plan-hint">和同行的人建立群組，隨時看到彼此的位置；走散時按一下「找他」，對方手機會響，回覆位置、樓層和照片。</p>
+        <p id="group-server-line" class="hint"></p>
+        <button type="button" id="group-open-settings" class="link-btn">⚙️ 設定群組伺服器網址</button>
+        <div class="group-actions">
+          <button type="button" id="group-create" class="primary-btn">建立群組</button>
+          <button type="button" id="group-paste" class="ghost-btn">用邀請連結加入</button>
+        </div>
+      </div>
+
+      <div id="group-on" hidden>
+        <div class="group-head">
+          <b id="group-name"></b>
+          <span id="group-meta" class="hint"></span>
+          <span id="group-tier" class="hint"></span>
+        </div>
+        <div class="group-actions">
+          <button type="button" id="group-find-all" class="primary-btn">📣 找全部人</button>
+          <button type="button" id="group-here" class="ghost-btn">📍 我在這</button>
+        </div>
+        <p id="group-status" class="status" aria-live="polite"></p>
+        <ul id="group-members" class="members"></ul>
+        <p id="group-push" class="hint"></p>
+        <div id="group-invite" class="group-invite"></div>
+        <button type="button" id="group-leave" class="link-btn">離開群組</button>
+      </div>
+    </section>
   </main>
 
   <dialog id="settings">
@@ -147,6 +178,8 @@
       <label for="claude-key">Claude API 金鑰（AI 功能用，可不填）</label>
       <input id="claude-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
       <p class="hint">金鑰只存在這台手機。Claude 金鑰無法限制網址，建議到 Claude Console 設定每月花費上限。</p>
+      <label for="group-server">群組伺服器網址（要用群組找人才需要，由管理員提供）</label>
+      <input id="group-server" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…">
       <button type="button" id="share-setup" class="link-btn">分享設定給家人</button>
       <p class="hint">設定碼含金鑰，只傳給家人，不要貼到公開的地方。</p>
       <div class="dialog-actions">
@@ -179,6 +212,107 @@
       <div class="dialog-actions">
         <button value="cancel" formnovalidate class="ghost-btn">取消</button>
         <button value="save" class="primary-btn">儲存</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <dialog id="group-create-dialog">
+    <form id="gc-form">
+      <h2>建立群組</h2>
+      <p id="gc-server" class="hint"></p>
+      <label for="gc-name">群組名稱</label>
+      <input id="gc-name" type="text" maxlength="30" required placeholder="例如：週末出遊" autocomplete="off">
+      <label for="gc-code">建立暗號（後台電腦 .env 的 GROUP_CREATE_CODE）</label>
+      <input id="gc-code" type="password" required autocomplete="off" spellcheck="false">
+      <label for="gc-me">你的名字</label>
+      <input id="gc-me" type="text" maxlength="20" required autocomplete="off">
+      <label>你的表情</label>
+      <div id="gc-emoji" class="emoji-row"></div>
+      <p id="gc-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost-btn gd-cancel">取消</button>
+        <button type="submit" id="gc-submit" class="primary-btn">建立</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="group-paste-dialog">
+    <form id="gp-form">
+      <h2>用邀請連結加入</h2>
+      <label for="gp-text">貼上管理員傳來的邀請連結</label>
+      <input id="gp-text" type="text" autocomplete="off" spellcheck="false" placeholder="https://…?join=…">
+      <p class="hint">也可以直接用手機相機掃 QR，或點邀請連結，會自動帶進來。</p>
+      <p id="gp-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost-btn gd-cancel">取消</button>
+        <button type="submit" class="primary-btn">下一步</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="group-join-dialog">
+    <form id="gj-form">
+      <h2 id="gj-title">加入群組</h2>
+      <p id="gj-server" class="hint"></p>
+      <label for="gj-name">你的名字</label>
+      <input id="gj-name" type="text" maxlength="20" required autocomplete="off">
+      <label>你的表情</label>
+      <div id="gj-emoji" class="emoji-row"></div>
+      <p class="hint">加入後，群組裡的人看得到你回報的位置。群組 7 天後自動解散並刪除資料。</p>
+      <p id="gj-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost-btn gd-cancel">取消</button>
+        <button type="submit" id="gj-submit" class="primary-btn">加入</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="find-dialog" class="alert-dialog">
+    <form id="fd-form">
+      <h2 id="fd-title">有人問你在哪裡？</h2>
+      <p id="fd-sound-hint" class="hint" hidden>點一下畫面任何地方，下次就會有提示音。</p>
+      <label for="fd-floor">你在幾樓？</label>
+      <select id="fd-floor"></select>
+      <button type="button" id="fd-photo-btn" class="ghost-btn photo-btn">📷 拍一張照片（選填）</button>
+      <input id="fd-photo-input" type="file" accept="image/*" capture="environment" hidden>
+      <img id="fd-preview" class="preview" alt="預覽照片" hidden>
+      <label for="fd-note">想說一句話（選填）</label>
+      <input id="fd-note" type="text" maxlength="100" placeholder="例如：在冰淇淋店前面" autocomplete="off">
+      <p id="fd-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="fd-later" class="ghost-btn">等一下</button>
+        <button type="submit" id="fd-submit" class="primary-btn">📍 送出我的位置</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="find-result-dialog">
+    <div class="result">
+      <h2 id="fr-title"></h2>
+      <p id="fr-info" class="hint"></p>
+      <iframe id="fr-map" class="result-map" title="對方位置" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      <p id="fr-photo-wait" class="hint" hidden>照片載入中…</p>
+      <img id="fr-photo" class="result-photo" alt="對方傳來的照片" hidden>
+      <div class="dialog-actions">
+        <a id="fr-nav" class="primary-btn nav-link" href="#" target="_blank" rel="noopener">導航過去</a>
+        <button type="button" id="fr-close" class="ghost-btn">關閉</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="here-dialog">
+    <form id="hr-form">
+      <h2>📍 我在這</h2>
+      <p class="hint">更新你的位置，群組裡的人看得到，不會跳通知。</p>
+      <label for="hr-floor">你在幾樓？</label>
+      <select id="hr-floor"></select>
+      <label for="hr-note">一句話（選填）</label>
+      <input id="hr-note" type="text" maxlength="100" placeholder="例如：在廁所旁邊的長椅" autocomplete="off">
+      <p id="hr-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost-btn gd-cancel">取消</button>
+        <button type="submit" id="hr-submit" class="primary-btn">送出</button>
       </div>
     </form>
   </dialog>
