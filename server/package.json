@@ -1,0 +1,20 @@
+{
+  "name": "travel-toy-group-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "旅遊玩意「群組找人」後台：群組、位置、找人推播、金鑰代轉（proxy）",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "start": "node src/index.js",
+    "test": "node --test \"test/*.test.js\"",
+    "vapid": "node scripts/vapid.mjs"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.50.0"
+  }
+}

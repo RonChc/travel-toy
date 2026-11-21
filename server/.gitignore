@@ -1,0 +1,7 @@
+# 金鑰、VAPID 私鑰、資料庫與照片都不能進 git（repo 是公開的）
+.env
+.env.*
+!.env.example
+data/
+node_modules/
+e2e/out/
